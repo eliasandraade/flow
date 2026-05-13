@@ -5,8 +5,6 @@ using Flow.Domain.Entities;
 using Flow.Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Identity;
-using DomainRefreshToken = Flow.Domain.Entities.RefreshToken;
-
 namespace Flow.Application.Auth.Commands.Register;
 
 public class RegisterCommandHandler : IRequestHandler<RegisterCommand, AuthResultDto>
