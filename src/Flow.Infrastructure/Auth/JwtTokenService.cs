@@ -11,6 +11,14 @@ namespace Flow.Infrastructure.Auth;
 
 public class JwtTokenService : IJwtTokenService
 {
+    private static readonly JwtSecurityTokenHandler _tokenHandler;
+
+    static JwtTokenService()
+    {
+        _tokenHandler = new JwtSecurityTokenHandler();
+        _tokenHandler.InboundClaimTypeMap.Clear();
+    }
+
     private readonly IConfiguration _configuration;
 
     public JwtTokenService(IConfiguration configuration)
@@ -42,7 +50,7 @@ public class JwtTokenService : IJwtTokenService
             expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
             signingCredentials: credentials);
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        return _tokenHandler.WriteToken(token);
     }
 
     public string GenerateRefreshToken()
@@ -63,14 +71,12 @@ public class JwtTokenService : IJwtTokenService
             ValidIssuer = settings["Issuer"],
             ValidateAudience = true,
             ValidAudience = settings["Audience"],
-            ValidateLifetime = false  // allow extracting userId from expired tokens (for refresh flow)
+            ValidateLifetime = false  // allows extracting userId from expired tokens (refresh flow)
         };
 
         try
         {
-            var handler = new JwtSecurityTokenHandler();
-            handler.InboundClaimTypeMap.Clear();
-            var principal = handler.ValidateToken(accessToken, validationParams, out _);
+            var principal = _tokenHandler.ValidateToken(accessToken, validationParams, out _);
             var claim = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
             return Guid.TryParse(claim, out var id) ? id : null;
         }

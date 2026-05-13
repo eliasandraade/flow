@@ -65,4 +65,17 @@ public class JwtTokenServiceTests
         token1.Should().NotBeNullOrWhiteSpace();
         token1.Should().NotBe(token2);
     }
+
+    [Fact]
+    public void GetUserIdFromToken_TamperedSignature_ReturnsNull()
+    {
+        var user = User.Create("Ana Lima", "ana@example.com", UserRole.Manager);
+        var token = _service.GenerateAccessToken(user, new List<string> { "Manager" });
+        var parts = token.Split('.');
+        var tampered = parts[0] + "." + parts[1] + ".invalidsignature";
+
+        var result = _service.GetUserIdFromToken(tampered);
+
+        result.Should().BeNull();
+    }
 }
