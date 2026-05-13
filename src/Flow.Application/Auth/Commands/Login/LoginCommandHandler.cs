@@ -33,7 +33,7 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, AuthResultDto>
         var roles = await _userManager.GetRolesAsync(user);
         var accessToken = _jwtTokenService.GenerateAccessToken(user, roles);
         var refreshTokenValue = _jwtTokenService.GenerateRefreshToken();
-        var refreshToken = DomainRefreshToken.Create(user.Id, refreshTokenValue, DateTimeOffset.UtcNow.AddDays(7));
+        var refreshToken = Flow.Domain.Entities.RefreshToken.Create(user.Id, refreshTokenValue, DateTimeOffset.UtcNow.AddDays(7));
 
         _context.RefreshTokens.Add(refreshToken);
         await _context.SaveChangesAsync(cancellationToken);
