@@ -14,6 +14,10 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
             .IsRequired()
             .HasMaxLength(500);
 
+        builder.Property(rt => rt.ExpiresAt).IsRequired();
+        builder.Property(rt => rt.CreatedAt).IsRequired();
+        builder.Property(rt => rt.IsRevoked).IsRequired().HasDefaultValue(false);
+
         builder.HasIndex(rt => rt.Token).IsUnique();
 
         builder.HasOne<User>()
