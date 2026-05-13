@@ -37,12 +37,12 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
         if (!storedToken.IsActive)
             throw new ForbiddenException("Refresh token is expired or revoked.");
 
-        storedToken.Revoke();
-
         var user = await _userManager.FindByIdAsync(userId.ToString())
             ?? throw new NotFoundException(nameof(User), userId);
 
         var roles = await _userManager.GetRolesAsync(user);
+
+        storedToken.Revoke();
         var newAccessToken = _jwtTokenService.GenerateAccessToken(user, roles);
         var newRefreshValue = _jwtTokenService.GenerateRefreshToken();
         var newRefreshToken = DomainRefreshToken.Create(user.Id, newRefreshValue, DateTimeOffset.UtcNow.AddDays(7));

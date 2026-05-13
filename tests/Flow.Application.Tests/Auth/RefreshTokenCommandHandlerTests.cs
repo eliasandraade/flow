@@ -3,7 +3,6 @@ using Flow.Application.Auth.Commands.RefreshToken;
 using Flow.Application.Common.Exceptions;
 using Flow.Application.Common.Interfaces;
 using Flow.Domain.Entities;
-using Flow.Domain.Enums;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Moq;
@@ -68,6 +67,74 @@ public class RefreshTokenCommandHandlerTests
         var act = () => handler.Handle(new RefreshTokenCommand("access", "revoked-token"), CancellationToken.None);
 
         await act.Should().ThrowAsync<ForbiddenException>();
+    }
+
+    [Fact]
+    public async Task Handle_TokenNotFound_ThrowsForbiddenException()
+    {
+        var userId = Guid.NewGuid();
+        _jwtServiceMock.Setup(j => j.GetUserIdFromToken("access")).Returns(userId);
+
+        var tokens = new List<RefreshToken>().AsQueryable();
+        var asyncProvider = new TestAsyncQueryProvider<RefreshToken>(tokens.Provider);
+        var mockDbSet = new Mock<DbSet<RefreshToken>>();
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.Provider).Returns(asyncProvider);
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.Expression).Returns(tokens.Expression);
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.ElementType).Returns(tokens.ElementType);
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.GetEnumerator()).Returns(tokens.GetEnumerator());
+        mockDbSet.As<IAsyncEnumerable<RefreshToken>>()
+            .Setup(m => m.GetAsyncEnumerator(It.IsAny<CancellationToken>()))
+            .Returns(new TestAsyncEnumerator<RefreshToken>(tokens.GetEnumerator()));
+
+        _contextMock.Setup(c => c.RefreshTokens).Returns(mockDbSet.Object);
+
+        var handler = new RefreshTokenCommandHandler(
+            _userManagerMock.Object, _jwtServiceMock.Object, _contextMock.Object);
+
+        var act = () => handler.Handle(new RefreshTokenCommand("access", "nonexistent-token"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>();
+    }
+
+    [Fact]
+    public async Task Handle_ValidTokens_RotatesTokenAndReturnsAuthResult()
+    {
+        var userId = Guid.NewGuid();
+        var refreshToken = RefreshToken.Create(userId, "valid-refresh", DateTimeOffset.UtcNow.AddDays(7));
+
+        _jwtServiceMock.Setup(j => j.GetUserIdFromToken("access")).Returns(userId);
+        _jwtServiceMock.Setup(j => j.GenerateAccessToken(It.IsAny<User>(), It.IsAny<IList<string>>()))
+            .Returns("new-access");
+        _jwtServiceMock.Setup(j => j.GenerateRefreshToken()).Returns("new-refresh");
+
+        var tokens = new List<RefreshToken> { refreshToken }.AsQueryable();
+        var asyncProvider = new TestAsyncQueryProvider<RefreshToken>(tokens.Provider);
+        var mockDbSet = new Mock<DbSet<RefreshToken>>();
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.Provider).Returns(asyncProvider);
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.Expression).Returns(tokens.Expression);
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.ElementType).Returns(tokens.ElementType);
+        mockDbSet.As<IQueryable<RefreshToken>>().Setup(m => m.GetEnumerator()).Returns(tokens.GetEnumerator());
+        mockDbSet.As<IAsyncEnumerable<RefreshToken>>()
+            .Setup(m => m.GetAsyncEnumerator(It.IsAny<CancellationToken>()))
+            .Returns(new TestAsyncEnumerator<RefreshToken>(tokens.GetEnumerator()));
+        mockDbSet.Setup(d => d.Add(It.IsAny<RefreshToken>()));
+
+        _contextMock.Setup(c => c.RefreshTokens).Returns(mockDbSet.Object);
+
+        var user = User.Create("Test User", "test@example.com", Flow.Domain.Enums.UserRole.Operator);
+        _userManagerMock.Setup(um => um.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(um => um.GetRolesAsync(user)).ReturnsAsync(new List<string>());
+
+        var handler = new RefreshTokenCommandHandler(
+            _userManagerMock.Object, _jwtServiceMock.Object, _contextMock.Object);
+
+        var result = await handler.Handle(new RefreshTokenCommand("access", "valid-refresh"), CancellationToken.None);
+
+        result.AccessToken.Should().Be("new-access");
+        result.RefreshToken.Should().Be("new-refresh");
+        refreshToken.IsRevoked.Should().BeTrue();
+        mockDbSet.Verify(d => d.Add(It.IsAny<RefreshToken>()), Times.Once);
+        _contextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }
 
