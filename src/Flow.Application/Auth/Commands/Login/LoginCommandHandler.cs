@@ -4,6 +4,7 @@ using Flow.Application.Common.Interfaces;
 using Flow.Domain.Entities;
 using MediatR;
 using Microsoft.AspNetCore.Identity;
+using DomainRefreshToken = Flow.Domain.Entities.RefreshToken;
 
 namespace Flow.Application.Auth.Commands.Login;
 
@@ -34,7 +35,7 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, AuthResultDto>
         var roles = await _userManager.GetRolesAsync(user);
         var accessToken = _jwtTokenService.GenerateAccessToken(user, roles);
         var refreshTokenValue = _jwtTokenService.GenerateRefreshToken();
-        var refreshToken = RefreshToken.Create(user.Id, refreshTokenValue, DateTimeOffset.UtcNow.AddDays(7));
+        var refreshToken = DomainRefreshToken.Create(user.Id, refreshTokenValue, DateTimeOffset.UtcNow.AddDays(7));
 
         _context.RefreshTokens.Add(refreshToken);
         await _context.SaveChangesAsync(cancellationToken);
