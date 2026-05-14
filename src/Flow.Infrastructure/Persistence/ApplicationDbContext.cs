@@ -13,6 +13,12 @@ public class ApplicationDbContext
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Idea> Ideas => Set<Idea>();
+    public DbSet<IdeaComment> IdeaComments => Set<IdeaComment>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectSnapshot> ProjectSnapshots => Set<ProjectSnapshot>();
+    public DbSet<StrategicGuideline> StrategicGuidelines => Set<StrategicGuideline>();
+    public DbSet<PointLedgerEntry> PointLedgerEntries => Set<PointLedgerEntry>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
