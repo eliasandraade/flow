@@ -43,7 +43,7 @@ public class SubmitIdeaCommandHandlerTests
         _contextMock.Verify(
             c => c.SaveChangesWithAuditAsync(
                 It.Is<IEnumerable<DomainAuditLog>>(logs =>
-                    logs.Any(l => l.Action == "Submitted" && l.EntityId == idea.Id)),
+                    logs.Any(l => l.Action == "Submitted" && l.EntityId == idea.Id && l.ActorId == actorId)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

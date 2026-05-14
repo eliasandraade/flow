@@ -103,6 +103,6 @@ public class IdeasController : ControllerBase
         Guid id, [FromBody] AddIdeaCommentCommand command, CancellationToken ct)
     {
         var result = await _mediator.Send(command with { IdeaId = id }, ct);
-        return Created(string.Empty, result);
+        return CreatedAtAction(nameof(GetComments), new { id = id }, result);
     }
 }

@@ -34,7 +34,12 @@ public class CreateIdeaCommandHandler : IRequestHandler<CreateIdeaCommand, IdeaS
             actorId, request.LinkedGuidelineId);
 
         _context.Ideas.Add(idea);
-        await _context.SaveChangesAsync(cancellationToken);
+
+        var audit = AuditLog.Create(
+            "Idea", idea.Id, "Created",
+            actorId, _currentUser.UserName ?? "Unknown");
+
+        await _context.SaveChangesWithAuditAsync(new[] { audit }, cancellationToken);
 
         return new IdeaSummaryDto(
             idea.Id, idea.Title, idea.Problem,

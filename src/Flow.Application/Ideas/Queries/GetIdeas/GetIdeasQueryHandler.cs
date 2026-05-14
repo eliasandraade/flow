@@ -17,11 +17,16 @@ public class GetIdeasQueryHandler : IRequestHandler<GetIdeasQuery, IReadOnlyList
         if (request.SubmittedById.HasValue)
             query = query.Where(i => i.SubmittedBy == request.SubmittedById.Value);
 
-        var ideas = await query
+        var rows = await query
             .OrderByDescending(i => i.CreatedAt)
+            .Select(i => new
+            {
+                i.Id, i.Title, i.Problem, i.Status, i.Priority,
+                i.SubmittedBy, i.LinkedGuidelineId, i.CreatedAt
+            })
             .ToListAsync(cancellationToken);
 
-        return ideas
+        return rows
             .Select(i => new IdeaSummaryDto(
                 i.Id, i.Title, i.Problem,
                 i.Status.ToString(), i.Priority.ToString(),
