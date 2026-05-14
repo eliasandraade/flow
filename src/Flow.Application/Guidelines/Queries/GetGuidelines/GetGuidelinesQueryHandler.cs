@@ -14,13 +14,10 @@ public class GetGuidelinesQueryHandler : IRequestHandler<GetGuidelinesQuery, IRe
     public async Task<IReadOnlyList<GuidelineDto>> Handle(
         GetGuidelinesQuery request, CancellationToken cancellationToken)
     {
-        var guidelines = await _context.StrategicGuidelines
+        return await _context.StrategicGuidelines
             .OrderBy(g => g.Title)
-            .ToListAsync(cancellationToken);
-
-        return guidelines
             .Select(g => new GuidelineDto(
                 g.Id, g.Title, g.Description, g.CreatedBy, g.CreatedAt, g.UpdatedAt))
-            .ToList();
+            .ToListAsync(cancellationToken);
     }
 }

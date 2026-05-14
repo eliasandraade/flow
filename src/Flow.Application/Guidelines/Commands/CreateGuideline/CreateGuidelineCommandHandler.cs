@@ -18,7 +18,8 @@ public class CreateGuidelineCommandHandler : IRequestHandler<CreateGuidelineComm
 
     public async Task<GuidelineDto> Handle(CreateGuidelineCommand request, CancellationToken cancellationToken)
     {
-        var actorId = _currentUser.UserId!.Value;
+        var actorId = _currentUser.UserId
+            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
         var guideline = StrategicGuideline.Create(request.Title, request.Description, actorId);
 
         _context.StrategicGuidelines.Add(guideline);

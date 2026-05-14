@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -82,6 +85,10 @@ public class GuidelinesControllerTests : IClassFixture<FlowWebApplicationFactory
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.GetArrayLength().Should().BeGreaterThan(0);
+        var titles = Enumerable.Range(0, body.GetArrayLength())
+            .Select(i => body[i].GetProperty("title").GetString())
+            .ToList();
+        titles.Should().Contain("Digital Transformation");
     }
 
     [Fact]
@@ -125,5 +132,39 @@ public class GuidelinesControllerTests : IClassFixture<FlowWebApplicationFactory
 
         var deleteResponse = await client.DeleteAsync($"/api/v1/guidelines/{id}");
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task GetGuidelineById_ExistingId_Returns200WithGuideline()
+    {
+        var client = _factory.CreateClient();
+        var token = await _factory.GetTokenForRoleAsync("Leadership");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var createResponse = await client.PostAsJsonAsync("/api/v1/guidelines", new
+        {
+            title = "Sustainability",
+            description = "Reduce environmental impact."
+        });
+        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var id = created.GetProperty("id").GetString()!;
+
+        var response = await client.GetAsync($"/api/v1/guidelines/{id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("title").GetString().Should().Be("Sustainability");
+    }
+
+    [Fact]
+    public async Task GetGuidelineById_NonExistentId_Returns404()
+    {
+        var client = _factory.CreateClient();
+        var token = await _factory.GetTokenForRoleAsync("Operator");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.GetAsync($"/api/v1/guidelines/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 }
