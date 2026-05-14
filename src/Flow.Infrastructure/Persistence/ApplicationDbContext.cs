@@ -19,6 +19,7 @@ public class ApplicationDbContext
     public DbSet<ProjectSnapshot> ProjectSnapshots => Set<ProjectSnapshot>();
     public DbSet<StrategicGuideline> StrategicGuidelines => Set<StrategicGuideline>();
     public DbSet<PointLedgerEntry> PointLedgerEntries => Set<PointLedgerEntry>();
+    public DbSet<Result> Results => Set<Result>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

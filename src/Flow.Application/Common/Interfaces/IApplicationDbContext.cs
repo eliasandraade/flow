@@ -14,6 +14,7 @@ public interface IApplicationDbContext
     DbSet<ProjectSnapshot> ProjectSnapshots { get; }
     DbSet<StrategicGuideline> StrategicGuidelines { get; }
     DbSet<PointLedgerEntry> PointLedgerEntries { get; }
+    DbSet<Result> Results { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
