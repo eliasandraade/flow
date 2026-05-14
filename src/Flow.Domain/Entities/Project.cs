@@ -18,6 +18,7 @@ public class Project : BaseEntity
     public DateTimeOffset? Deadline { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public string? BlockedReason { get; private set; }
+    public string? CancelledReason { get; private set; }
 
     private Project() { }
 
@@ -59,9 +60,8 @@ public class Project : BaseEntity
         decimal? actualCost,
         DateTimeOffset? deadline)
     {
-        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("Project title is required.");
-        if (string.IsNullOrWhiteSpace(description)) throw new DomainException("Project description is required.");
-        if (ownerId == Guid.Empty) throw new DomainException("Project must have a valid owner.");
+        if (Status == ProjectStatus.Completed || Status == ProjectStatus.Cancelled)
+            throw new DomainException("Completed or Cancelled projects cannot be edited.");
 
         Title = title;
         Description = description;
@@ -95,10 +95,13 @@ public class Project : BaseEntity
 
     public void Cancel(string reason)
     {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new DomainException("A reason is required when cancelling a project.");
         if (Status != ProjectStatus.InProgress && Status != ProjectStatus.Blocked)
             throw new DomainException("Only InProgress or Blocked projects can be cancelled.");
 
         Status = ProjectStatus.Cancelled;
+        CancelledReason = reason;
         SetUpdated();
     }
 

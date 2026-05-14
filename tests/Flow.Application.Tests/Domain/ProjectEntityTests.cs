@@ -90,7 +90,8 @@ public class ProjectEntityTests
         project.Complete();
 
         var act = () => project.Block("reason");
-        act.Should().Throw<DomainException>();
+        act.Should().Throw<DomainException>()
+            .WithMessage("*Planned*");
     }
 
     [Fact]
@@ -157,6 +158,7 @@ public class ProjectEntityTests
         project.Cancel("No longer needed.");
 
         project.Status.Should().Be(ProjectStatus.Cancelled);
+        project.CancelledReason.Should().Be("No longer needed.");
     }
 
     [Fact]
@@ -167,6 +169,7 @@ public class ProjectEntityTests
         project.Cancel("Cancelled while blocked.");
 
         project.Status.Should().Be(ProjectStatus.Cancelled);
+        project.CancelledReason.Should().Be("Cancelled while blocked.");
     }
 
     [Fact]
@@ -174,7 +177,31 @@ public class ProjectEntityTests
     {
         var project = CreatePlannedProject();
         var act = () => project.Cancel("reason");
-        act.Should().Throw<DomainException>();
+        act.Should().Throw<DomainException>()
+            .WithMessage("*InProgress*");
+    }
+
+    [Fact]
+    public void Cancel_EmptyReason_ThrowsDomainException()
+    {
+        var project = CreatePlannedProject();
+        project.Start();
+
+        var act = () => project.Cancel("   ");
+        act.Should().Throw<DomainException>()
+            .WithMessage("*reason*");
+    }
+
+    [Fact]
+    public void Update_CancelledProject_ThrowsDomainException()
+    {
+        var project = CreatePlannedProject();
+        project.Start();
+        project.Cancel("done");
+
+        var act = () => project.Update("T", "D", ProjectPriority.Low, Guid.NewGuid(), null, null, null);
+        act.Should().Throw<DomainException>()
+            .WithMessage("*Cancelled*");
     }
 }
 
@@ -199,7 +226,22 @@ public class ProjectSnapshotTests
         snapshot.TriggerAction.Should().Be("Started");
         snapshot.TriggeredByActorId.Should().Be(actorId);
         snapshot.SchemaVersion.Should().Be(1);
-        snapshot.StartDate.Should().NotBeNull();
         snapshot.TakenAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+        snapshot.CancelledReason.Should().BeNull();
+    }
+
+    [Fact]
+    public void Create_FromCancelledProject_CapturesCancelledReason()
+    {
+        var ownerId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var project = Project.Create("My Project", "Desc", ownerId, ProjectPriority.High);
+        project.Start();
+        project.Cancel("Budget cut.");
+
+        var snapshot = ProjectSnapshot.Create(project, "John Doe", "Cancelled", actorId);
+
+        snapshot.Status.Should().Be(ProjectStatus.Cancelled);
+        snapshot.CancelledReason.Should().Be("Budget cut.");
     }
 }

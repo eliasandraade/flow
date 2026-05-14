@@ -19,6 +19,7 @@ public class ProjectSnapshot
     public DateTimeOffset? Deadline { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public string? BlockedReason { get; private set; }
+    public string? CancelledReason { get; private set; }
     public DateTimeOffset TakenAt { get; private set; }
     public string TriggerAction { get; private set; } = string.Empty;
     public Guid TriggeredByActorId { get; private set; }
@@ -32,6 +33,11 @@ public class ProjectSnapshot
         string triggerAction,
         Guid triggeredByActorId)
     {
+        if (string.IsNullOrWhiteSpace(ownerName))
+            throw new ArgumentException("Owner name is required.", nameof(ownerName));
+        if (string.IsNullOrWhiteSpace(triggerAction))
+            throw new ArgumentException("Trigger action is required.", nameof(triggerAction));
+
         return new ProjectSnapshot
         {
             Id = Guid.NewGuid(),
@@ -49,6 +55,7 @@ public class ProjectSnapshot
             Deadline = project.Deadline,
             CompletedAt = project.CompletedAt,
             BlockedReason = project.BlockedReason,
+            CancelledReason = project.CancelledReason,
             TakenAt = DateTimeOffset.UtcNow,
             TriggerAction = triggerAction,
             TriggeredByActorId = triggeredByActorId,
