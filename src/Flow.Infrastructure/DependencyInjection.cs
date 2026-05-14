@@ -31,7 +31,9 @@ public static class DependencyInjection
                 options.Password.RequireUppercase = false;
                 options.User.RequireUniqueEmail = true;
             });
-        identityBuilder.AddEntityFrameworkStores<ApplicationDbContext>();
+        identityBuilder
+            .AddRoles<IdentityRole<Guid>>()
+            .AddEntityFrameworkStores<ApplicationDbContext>();
 
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 

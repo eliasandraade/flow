@@ -53,14 +53,14 @@ public class LoginCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_UnknownEmail_ThrowsNotFoundException()
+    public async Task Handle_UnknownEmail_ThrowsForbiddenException()
     {
         _userManagerMock.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
 
         var act = () => _handler.Handle(
             new LoginCommand("nobody@example.com", "pass"), CancellationToken.None);
 
-        await act.Should().ThrowAsync<NotFoundException>();
+        await act.Should().ThrowAsync<ForbiddenException>();
     }
 
     [Fact]
