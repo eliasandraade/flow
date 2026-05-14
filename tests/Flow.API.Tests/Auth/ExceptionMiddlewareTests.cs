@@ -48,11 +48,17 @@ public class ExceptionMiddlewareTests : IClassFixture<FlowWebApplicationFactory>
         var client = _factory.CreateClient();
         ExceptionMiddlewareTestEndpoints.NextException =
             new Flow.Domain.Exceptions.DomainException("Invalid state transition.");
+        try
+        {
+            var response = await client.GetAsync("/test-exception");
 
-        var response = await client.GetAsync("/test-exception");
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        body.GetProperty("title").GetString().Should().Be("Invalid state transition.");
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            body.GetProperty("title").GetString().Should().Be("Invalid state transition.");
+        }
+        finally
+        {
+            ExceptionMiddlewareTestEndpoints.NextException = null;
+        }
     }
 }
