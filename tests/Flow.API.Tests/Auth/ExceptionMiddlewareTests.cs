@@ -9,10 +9,12 @@ namespace Flow.API.Tests.Auth;
 
 public class ExceptionMiddlewareTests : IClassFixture<FlowWebApplicationFactory>
 {
+    private readonly FlowWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
     public ExceptionMiddlewareTests(FlowWebApplicationFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -38,5 +40,19 @@ public class ExceptionMiddlewareTests : IClassFixture<FlowWebApplicationFactory>
         var response = await _client.PostAsJsonAsync("/api/v1/auth/register", payload);
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task DomainException_Returns400WithMessage()
+    {
+        var client = _factory.CreateClient();
+        ExceptionMiddlewareTestEndpoints.NextException =
+            new Flow.Domain.Exceptions.DomainException("Invalid state transition.");
+
+        var response = await client.GetAsync("/test-exception");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("title").GetString().Should().Be("Invalid state transition.");
     }
 }

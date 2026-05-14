@@ -48,6 +48,8 @@ public class ExceptionHandlingMiddleware
                 (HttpStatusCode.Conflict, ce.Message, (object?)null),
             ForbiddenException fe =>
                 (HttpStatusCode.Forbidden, fe.Message, (object?)null),
+            Flow.Domain.Exceptions.DomainException de =>
+                (HttpStatusCode.BadRequest, de.Message, (object?)null),
             _ =>
                 (HttpStatusCode.InternalServerError, "An unexpected error occurred.", (object?)null)
         };

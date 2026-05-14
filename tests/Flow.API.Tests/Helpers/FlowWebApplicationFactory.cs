@@ -34,6 +34,11 @@ public class FlowWebApplicationFactory : WebApplicationFactory<Program>
 
             services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseInMemoryDatabase(_dbName, _dbRoot));
+
+            // Register the test-only controller from this assembly so the
+            // ExceptionHandlingMiddleware in Program.cs can catch exceptions thrown by it.
+            services.AddControllers()
+                .AddApplicationPart(typeof(FlowWebApplicationFactory).Assembly);
         });
     }
 }
