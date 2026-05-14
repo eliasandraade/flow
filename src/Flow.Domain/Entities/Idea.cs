@@ -24,6 +24,10 @@ public class Idea : BaseEntity
         Guid submittedBy,
         Guid? linkedGuidelineId = null)
     {
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("Idea title is required.");
+        if (string.IsNullOrWhiteSpace(description)) throw new DomainException("Idea description is required.");
+        if (string.IsNullOrWhiteSpace(problem)) throw new DomainException("Idea problem statement is required.");
+
         var now = DateTimeOffset.UtcNow;
         return new Idea
         {
@@ -43,6 +47,10 @@ public class Idea : BaseEntity
     {
         if (Status != IdeaStatus.Draft)
             throw new DomainException("Only Draft ideas can be edited.");
+
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("Idea title is required.");
+        if (string.IsNullOrWhiteSpace(description)) throw new DomainException("Idea description is required.");
+        if (string.IsNullOrWhiteSpace(problem)) throw new DomainException("Idea problem statement is required.");
 
         Title = title;
         Description = description;
@@ -82,6 +90,9 @@ public class Idea : BaseEntity
 
     public void SetPriority(IdeaPriority priority)
     {
+        if (Status == IdeaStatus.Rejected || Status == IdeaStatus.Approved)
+            throw new DomainException("Priority cannot be changed on ideas that are already approved or rejected.");
+
         Priority = priority;
         SetUpdated();
     }

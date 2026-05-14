@@ -1,3 +1,5 @@
+using Flow.Domain.Exceptions;
+
 namespace Flow.Domain.Entities;
 
 public class IdeaComment
@@ -12,6 +14,10 @@ public class IdeaComment
 
     public static IdeaComment Create(Guid ideaId, Guid authorId, string body)
     {
+        if (ideaId == Guid.Empty) throw new DomainException("IdeaComment must reference a valid idea.");
+        if (authorId == Guid.Empty) throw new DomainException("IdeaComment must reference a valid author.");
+        if (string.IsNullOrWhiteSpace(body)) throw new DomainException("Comment body cannot be empty.");
+
         return new IdeaComment
         {
             Id = Guid.NewGuid(),
