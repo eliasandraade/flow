@@ -1,5 +1,9 @@
+using Flow.Application.Common.Interfaces;
+using Flow.Domain.Entities;
+using Flow.Domain.Enums;
 using Flow.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -40,5 +44,22 @@ public class FlowWebApplicationFactory : WebApplicationFactory<Program>
             services.AddControllers()
                 .AddApplicationPart(typeof(FlowWebApplicationFactory).Assembly);
         });
+    }
+
+    public async Task<string> GetTokenForRoleAsync(string role)
+    {
+        using var scope = Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+        var jwtService = scope.ServiceProvider.GetRequiredService<IJwtTokenService>();
+
+        var email = $"test-{role.ToLower()}-{Guid.NewGuid():N}@flow.test";
+        var userRole = Enum.Parse<UserRole>(role);
+        var user = User.Create($"Test {role}", email, userRole);
+
+        await userManager.CreateAsync(user, "Test123!");
+        await userManager.AddToRoleAsync(user, role);
+
+        var roles = await userManager.GetRolesAsync(user);
+        return jwtService.GenerateAccessToken(user, roles);
     }
 }
