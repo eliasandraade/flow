@@ -14,5 +14,6 @@ public class StrategicGuidelineConfiguration : IEntityTypeConfiguration<Strategi
         builder.Property(g => g.CreatedBy).IsRequired();
         builder.Property(g => g.CreatedAt).IsRequired();
         builder.Property(g => g.UpdatedAt).IsRequired();
+        builder.HasIndex(g => g.CreatedBy);
     }
 }

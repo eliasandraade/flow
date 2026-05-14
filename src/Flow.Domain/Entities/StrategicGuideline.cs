@@ -1,22 +1,28 @@
+using Flow.Domain.Common;
+using Flow.Domain.Exceptions;
+
 namespace Flow.Domain.Entities;
 
-public class StrategicGuideline
+public class StrategicGuideline : BaseEntity
 {
-    public Guid Id { get; private set; }
     public string Title { get; private set; } = string.Empty;
     public string Description { get; private set; } = string.Empty;
     public Guid CreatedBy { get; private set; }
-    public DateTimeOffset CreatedAt { get; private set; }
-    public DateTimeOffset UpdatedAt { get; private set; }
 
     private StrategicGuideline() { }
 
     public static StrategicGuideline Create(string title, string description, Guid createdBy)
     {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new DomainException("Guideline title is required.");
+        if (string.IsNullOrWhiteSpace(description))
+            throw new DomainException("Guideline description is required.");
+        if (createdBy == Guid.Empty)
+            throw new DomainException("CreatedBy must be a valid user ID.");
+
         var now = DateTimeOffset.UtcNow;
         return new StrategicGuideline
         {
-            Id = Guid.NewGuid(),
             Title = title,
             Description = description,
             CreatedBy = createdBy,
@@ -27,8 +33,13 @@ public class StrategicGuideline
 
     public void Update(string title, string description)
     {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new DomainException("Guideline title is required.");
+        if (string.IsNullOrWhiteSpace(description))
+            throw new DomainException("Guideline description is required.");
+
         Title = title;
         Description = description;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        SetUpdated();
     }
 }

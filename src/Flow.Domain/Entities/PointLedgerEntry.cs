@@ -1,3 +1,5 @@
+using Flow.Domain.Exceptions;
+
 namespace Flow.Domain.Entities;
 
 public class PointLedgerEntry
@@ -19,6 +21,17 @@ public class PointLedgerEntry
         string referenceType,
         Guid referenceId)
     {
+        if (userId == Guid.Empty)
+            throw new DomainException("UserId must be a valid user ID.");
+        if (points <= 0)
+            throw new DomainException("Points awarded must be a positive value.");
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new DomainException("Reason is required.");
+        if (string.IsNullOrWhiteSpace(referenceType))
+            throw new DomainException("ReferenceType is required.");
+        if (referenceId == Guid.Empty)
+            throw new DomainException("ReferenceId must be a valid ID.");
+
         return new PointLedgerEntry
         {
             Id = Guid.NewGuid(),
