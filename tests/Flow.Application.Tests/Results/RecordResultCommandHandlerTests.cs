@@ -7,6 +7,7 @@ using FluentAssertions;
 using Moq;
 using Xunit;
 using DomainAuditLog = Flow.Domain.Entities.AuditLog;
+using Flow.Application.Common.Exceptions;
 
 namespace Flow.Application.Tests.Results;
 
@@ -104,5 +105,75 @@ public class RecordResultCommandHandlerTests
         existingResult.ActualROI.Should().NotBeNull();
         existingResult.EstimatedROI.Should().NotBeNull(); // unchanged
         dto.Notes.Should().Be("Exceeded expectations");
+    }
+
+    [Fact]
+    public async Task Handle_AllNullFields_ExistingResult_ReturnsCurrentStateWithoutSaving()
+    {
+        var project = Project.Create("Test Project", "Desc", Guid.NewGuid(), ProjectPriority.Medium);
+        var existingResult = Result.Create(project.Id, _actorId);
+        existingResult.SetEstimated(100_000m, 0m, 50_000m);
+
+        var mockProjectSet = MockDbSetHelper.BuildMockDbSet(new[] { project });
+        var mockResultSet = MockDbSetHelper.BuildMockDbSet(new[] { existingResult });
+
+        _contextMock.Setup(c => c.Projects).Returns(mockProjectSet.Object);
+        _contextMock.Setup(c => c.Results).Returns(mockResultSet.Object);
+
+        var handler = new RecordResultCommandHandler(_contextMock.Object, _currentUserMock.Object);
+        var command = new RecordResultCommand(
+            ProjectId: project.Id,
+            EstimatedRevenue: null,
+            EstimatedSavings: null,
+            EstimatedCost: null,
+            ActualRevenue: null,
+            ActualSavings: null,
+            ActualCost: null,
+            PaybackPeriodMonths: null,
+            Notes: null);
+
+        var dto = await handler.Handle(command, CancellationToken.None);
+
+        // SaveChangesWithAuditAsync should NOT have been called
+        _contextMock.Verify(
+            c => c.SaveChangesWithAuditAsync(
+                It.IsAny<IEnumerable<DomainAuditLog>>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        dto.EstimatedROI.Should().NotBeNull(); // existing state preserved
+    }
+
+    [Fact]
+    public async Task Handle_AllNullFields_NoExistingResult_ThrowsValidationException()
+    {
+        var project = Project.Create("Test Project", "Desc", Guid.NewGuid(), ProjectPriority.Medium);
+
+        var mockProjectSet = MockDbSetHelper.BuildMockDbSet(new[] { project });
+        var mockResultSet = MockDbSetHelper.BuildMockDbSet<Result>(Array.Empty<Result>());
+
+        _contextMock.Setup(c => c.Projects).Returns(mockProjectSet.Object);
+        _contextMock.Setup(c => c.Results).Returns(mockResultSet.Object);
+
+        var handler = new RecordResultCommandHandler(_contextMock.Object, _currentUserMock.Object);
+        var command = new RecordResultCommand(
+            ProjectId: project.Id,
+            EstimatedRevenue: null,
+            EstimatedSavings: null,
+            EstimatedCost: null,
+            ActualRevenue: null,
+            ActualSavings: null,
+            ActualCost: null,
+            PaybackPeriodMonths: null,
+            Notes: null);
+
+        await FluentActions.Invoking(() => handler.Handle(command, CancellationToken.None))
+            .Should().ThrowAsync<ValidationException>();
+
+        _contextMock.Verify(
+            c => c.SaveChangesWithAuditAsync(
+                It.IsAny<IEnumerable<DomainAuditLog>>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

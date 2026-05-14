@@ -30,27 +30,41 @@ public class RecordResultCommandHandler : IRequestHandler<RecordResultCommand, R
         var result = await _context.Results
             .FirstOrDefaultAsync(r => r.ProjectId == request.ProjectId, cancellationToken);
 
+        bool hasEstimated = request.EstimatedRevenue.HasValue
+            || request.EstimatedSavings.HasValue
+            || request.EstimatedCost.HasValue;
+
+        bool hasActual = request.ActualRevenue.HasValue
+            || request.ActualSavings.HasValue
+            || request.ActualCost.HasValue;
+
+        bool hasNotes = request.PaybackPeriodMonths.HasValue || request.Notes is not null;
+
+        bool mutated = hasEstimated || hasActual || hasNotes;
+
+        if (!mutated && result is not null)
+            return ToDto(result); // existing result, nothing to change — skip save and audit
+
+        if (!mutated && result is null)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["fields"] = ["At least one field must be provided to record a result."]
+            });
+
+        // New result — only create if something will actually be set
         if (result is null)
         {
             result = Result.Create(request.ProjectId, actorId);
             _context.Results.Add(result);
         }
 
-        bool hasEstimated = request.EstimatedRevenue.HasValue
-            || request.EstimatedSavings.HasValue
-            || request.EstimatedCost.HasValue;
-
         if (hasEstimated)
             result.SetEstimated(request.EstimatedRevenue, request.EstimatedSavings, request.EstimatedCost);
-
-        bool hasActual = request.ActualRevenue.HasValue
-            || request.ActualSavings.HasValue
-            || request.ActualCost.HasValue;
 
         if (hasActual)
             result.SetActual(request.ActualRevenue, request.ActualSavings, request.ActualCost);
 
-        if (request.PaybackPeriodMonths.HasValue || request.Notes is not null)
+        if (hasNotes)
             result.SetNotes(request.PaybackPeriodMonths, request.Notes);
 
         var audit = AuditLog.Create(
