@@ -482,3 +482,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Production secrets — never commit environment-specific secrets
+appsettings.Production.json
+appsettings.*.local.json

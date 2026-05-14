@@ -6,6 +6,9 @@ namespace Flow.API.Middleware;
 
 public class ExceptionHandlingMiddleware
 {
+    private static readonly JsonSerializerOptions JsonOptions =
+        new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
 
@@ -29,6 +32,12 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
+        if (context.Response.HasStarted)
+        {
+            _logger.LogError(exception, "Exception occurred after response had started; cannot write error response.");
+            return;
+        }
+
         var (statusCode, title, errors) = exception switch
         {
             Application.Common.Exceptions.ValidationException ve =>
@@ -51,7 +60,7 @@ public class ExceptionHandlingMiddleware
 
         var body = JsonSerializer.Serialize(
             new { title, status = (int)statusCode, errors },
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            JsonOptions);
 
         await context.Response.WriteAsync(body);
     }
