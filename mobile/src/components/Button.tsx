@@ -54,7 +54,7 @@ export function Button({
   return (
     <TouchableOpacity
       onPress={handlePress}
-      disabled={disabled}
+      disabled={disabled || loading}
       activeOpacity={0.8}
       style={[
         styles.base,

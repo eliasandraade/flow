@@ -17,6 +17,7 @@ export function Card({ children, onPress, style, padding = theme.spacing.lg }: P
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.7}
+        // styles.touchable last: enforces 64px min touch target regardless of caller style
         style={[cardStyle, styles.touchable]}
       >
         {children}
