@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   actionBtn: { marginTop: theme.spacing.xxl },
   errorText: {
     textAlign: 'center',
-    color: '#EF4444',
+    color: theme.colors.status.rejected.text,
     marginTop: 48,
     padding: theme.spacing.lg,
   },

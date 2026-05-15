@@ -100,7 +100,7 @@ const styles = StyleSheet.create({
   errorText: {
     ...theme.typography.body,
     textAlign: 'center',
-    color: '#EF4444',
+    color: theme.colors.status.rejected.text,
     marginTop: 48,
     padding: theme.spacing.lg,
   },
