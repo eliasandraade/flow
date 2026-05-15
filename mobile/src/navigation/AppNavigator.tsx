@@ -8,7 +8,9 @@ import { PlaceholderManagerScreen } from '../screens/manager/PlaceholderManagerS
 import { PlaceholderLeadershipScreen } from '../screens/leadership/PlaceholderLeadershipScreen';
 
 const AuthStack = createNativeStackNavigator();
-const AppStack = createNativeStackNavigator();
+const OperatorStack = createNativeStackNavigator();
+const ManagerStack = createNativeStackNavigator();
+const LeadershipStack = createNativeStackNavigator();
 
 function AuthNavigator() {
   return (
@@ -20,37 +22,37 @@ function AuthNavigator() {
 
 function OperatorNavigator() {
   return (
-    <AppStack.Navigator>
-      <AppStack.Screen
+    <OperatorStack.Navigator>
+      <OperatorStack.Screen
         name="OperatorHome"
         component={PlaceholderOperatorScreen}
         options={{ title: 'My Ideas' }}
       />
-    </AppStack.Navigator>
+    </OperatorStack.Navigator>
   );
 }
 
 function ManagerNavigator() {
   return (
-    <AppStack.Navigator>
-      <AppStack.Screen
+    <ManagerStack.Navigator>
+      <ManagerStack.Screen
         name="ManagerHome"
         component={PlaceholderManagerScreen}
         options={{ title: 'Manager' }}
       />
-    </AppStack.Navigator>
+    </ManagerStack.Navigator>
   );
 }
 
 function LeadershipNavigator() {
   return (
-    <AppStack.Navigator>
-      <AppStack.Screen
+    <LeadershipStack.Navigator>
+      <LeadershipStack.Screen
         name="LeadershipHome"
         component={PlaceholderLeadershipScreen}
         options={{ title: 'Dashboard' }}
       />
-    </AppStack.Navigator>
+    </LeadershipStack.Navigator>
   );
 }
 
