@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Alert, ActivityIndicator, ScrollView,
-} from 'react-native';
+import { Alert } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
 import { IdeaSummary } from '../../types/api';
+import { Button } from '../../components/Button';
+import { FormInput } from '../../components/FormInput';
+import { ScreenContainer } from '../../components/ScreenContainer';
 
 export function SubmitIdeaScreen({ navigation }: any) {
   const [title, setTitle] = useState('');
@@ -37,57 +37,40 @@ export function SubmitIdeaScreen({ navigation }: any) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
-      <Text style={styles.label}>Title *</Text>
-      <TextInput
-        style={styles.input}
+    <ScreenContainer scrollable>
+      <FormInput
+        label="Title *"
         value={title}
         onChangeText={setTitle}
         placeholder="Brief, descriptive title"
       />
-
-      <Text style={styles.label}>Problem *</Text>
-      <TextInput
-        style={[styles.input, styles.multiline]}
+      <FormInput
+        label="Problem *"
         value={problem}
         onChangeText={setProblem}
         placeholder="What problem does this idea solve?"
         multiline
         numberOfLines={3}
+        textAlignVertical="top"
+        inputStyle={{ minHeight: 80 }}
       />
-
-      <Text style={styles.label}>Description *</Text>
-      <TextInput
-        style={[styles.input, styles.multiline]}
+      <FormInput
+        label="Description *"
         value={description}
         onChangeText={setDescription}
         placeholder="Describe your idea in detail"
         multiline
         numberOfLines={5}
+        textAlignVertical="top"
+        inputStyle={{ minHeight: 120 }}
       />
-
-      {loading ? (
-        <ActivityIndicator size="large" color="#2563EB" style={{ marginTop: 20 }} />
-      ) : (
-        <TouchableOpacity style={styles.button} onPress={handleCreate}>
-          <Text style={styles.buttonText}>Create Idea</Text>
-        </TouchableOpacity>
-      )}
-    </ScrollView>
+      <Button
+        variant="primary"
+        size="lg"
+        label="Create Idea"
+        onPress={handleCreate}
+        loading={loading}
+      />
+    </ScreenContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4, marginTop: 14 },
-  input: {
-    borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
-    padding: 12, backgroundColor: '#FFF', fontSize: 15,
-  },
-  multiline: { minHeight: 80, textAlignVertical: 'top' },
-  button: {
-    backgroundColor: '#2563EB', borderRadius: 8,
-    padding: 14, alignItems: 'center', marginTop: 24,
-  },
-  buttonText: { color: '#FFF', fontWeight: '600', fontSize: 16 },
-});

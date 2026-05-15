@@ -1,17 +1,13 @@
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { API_BASE } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import { AuthResult } from '../../types/api';
+import { theme } from '../../theme';
+import { Button } from '../../components/Button';
+import { FormInput } from '../../components/FormInput';
+import { ScreenContainer } from '../../components/ScreenContainer';
 
 export function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -36,14 +32,12 @@ export function LoginScreen() {
         throw new Error(body?.detail ?? body?.title ?? 'Invalid credentials');
       }
       const data: AuthResult = await response.json();
-
       await SecureStore.setItemAsync('accessToken', data.accessToken);
       await SecureStore.setItemAsync('refreshToken', data.refreshToken);
       await SecureStore.setItemAsync('userId', data.userId);
       await SecureStore.setItemAsync('name', data.name);
       await SecureStore.setItemAsync('email', data.email);
       await SecureStore.setItemAsync('role', data.role);
-
       setSession({
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
@@ -60,46 +54,57 @@ export function LoginScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Flow</Text>
-      <Text style={styles.subtitle}>Innovation Management</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-      {loading ? (
-        <ActivityIndicator size="large" color="#2563EB" style={{ marginTop: 8 }} />
-      ) : (
-        <TouchableOpacity style={styles.button} onPress={handleLogin}>
-          <Text style={styles.buttonText}>Sign In</Text>
-        </TouchableOpacity>
-      )}
-    </View>
+    <ScreenContainer>
+      <View style={styles.inner}>
+        <Text style={styles.title}>Flow</Text>
+        <Text style={styles.subtitle}>Innovation Management</Text>
+        <View style={styles.form}>
+          <FormInput
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <FormInput
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="••••••••"
+            secureTextEntry
+          />
+          <Button
+            variant="primary"
+            size="lg"
+            label="Sign In"
+            onPress={handleLogin}
+            loading={loading}
+            style={styles.button}
+          />
+        </View>
+      </View>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#F9FAFB' },
-  title: { fontSize: 36, fontWeight: 'bold', color: '#1E3A5F', textAlign: 'center' },
-  subtitle: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 36 },
-  input: {
-    borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
-    padding: 12, marginBottom: 12, backgroundColor: '#FFF', fontSize: 16,
+  inner: {
+    flex: 1,
+    justifyContent: 'center',
   },
-  button: {
-    backgroundColor: '#2563EB', borderRadius: 8,
-    padding: 14, alignItems: 'center', marginTop: 8,
+  title: {
+    ...theme.typography.display,
+    color: theme.colors.text.primary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xs,
   },
-  buttonText: { color: '#FFF', fontWeight: '600', fontSize: 16 },
+  subtitle: {
+    ...theme.typography.body,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xxl,
+  },
+  form: { gap: theme.spacing.xs },
+  button: { marginTop: theme.spacing.sm },
 });

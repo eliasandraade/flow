@@ -1,11 +1,14 @@
 import React from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, Alert,
-} from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
 import { IdeaDetail } from '../../types/api';
+import { theme } from '../../theme';
+import { normalizeStatus } from '../../utils/normalizeStatus';
+import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { StatusBadge } from '../../components/StatusBadge';
 
 export function IdeaDetailScreen({ route }: any) {
   const { id } = route.params as { id: string };
@@ -28,19 +31,17 @@ export function IdeaDetailScreen({ route }: any) {
   }
 
   if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color="#2563EB" />;
+    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
   }
   if (error || !idea) {
-    return (
-      <Text style={styles.errorText}>{(error as Error)?.message ?? 'Idea not found'}</Text>
-    );
+    return <Text style={styles.errorText}>{(error as Error)?.message ?? 'Idea not found'}</Text>;
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
+    <ScreenContainer scrollable>
       <Text style={styles.title}>{idea.title}</Text>
       <View style={styles.metaRow}>
-        <Text style={styles.badge}>{idea.status}</Text>
+        <StatusBadge status={normalizeStatus(idea.status)} />
         <Text style={styles.priority}>{idea.priority}</Text>
       </View>
 
@@ -51,12 +52,12 @@ export function IdeaDetailScreen({ route }: any) {
       <Text style={styles.body}>{idea.description}</Text>
 
       {idea.managerComment ? (
-        <>
+        <View style={styles.commentSection}>
           <Text style={styles.sectionLabel}>Manager Comment</Text>
-          <View style={styles.commentBox}>
+          <Card padding={theme.spacing.md}>
             <Text style={styles.commentText}>{idea.managerComment}</Text>
-          </View>
-        </>
+          </Card>
+        </View>
       ) : null}
 
       <Text style={styles.timestamp}>
@@ -64,33 +65,61 @@ export function IdeaDetailScreen({ route }: any) {
       </Text>
 
       {idea.status === 'Draft' && (
-        <TouchableOpacity style={styles.submitBtn} onPress={handleSubmitForReview}>
-          <Text style={styles.submitBtnText}>Submit for Review</Text>
-        </TouchableOpacity>
+        <Button
+          variant="primary"
+          size="lg"
+          label="Submit for Review"
+          onPress={handleSubmitForReview}
+          style={styles.actionBtn}
+        />
       )}
-    </ScrollView>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
-  title: { fontSize: 20, fontWeight: 'bold', color: '#111827', marginBottom: 8 },
-  metaRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  badge: {
-    backgroundColor: '#EEF2FF', color: '#4338CA',
-    paddingHorizontal: 10, paddingVertical: 3,
-    borderRadius: 12, fontSize: 13, fontWeight: '500',
+  title: {
+    ...theme.typography.title,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.sm,
   },
-  priority: { color: '#6B7280', fontSize: 13, alignSelf: 'center' },
-  sectionLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginTop: 16, marginBottom: 4 },
-  body: { fontSize: 15, color: '#374151', lineHeight: 22 },
-  commentBox: { backgroundColor: '#FEF3C7', borderRadius: 6, padding: 10, marginTop: 4 },
-  commentText: { fontSize: 14, color: '#92400E', lineHeight: 20 },
-  timestamp: { fontSize: 12, color: '#9CA3AF', marginTop: 16 },
-  submitBtn: {
-    backgroundColor: '#059669', borderRadius: 8,
-    padding: 14, alignItems: 'center', marginTop: 24,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.xl,
   },
-  submitBtnText: { color: '#FFF', fontWeight: '600', fontSize: 16 },
-  errorText: { textAlign: 'center', color: '#EF4444', marginTop: 48, padding: 16 },
+  priority: {
+    ...theme.typography.label,
+    color: theme.colors.text.secondary,
+  },
+  sectionLabel: {
+    ...theme.typography.label,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing.xl,
+    marginBottom: theme.spacing.xs,
+  },
+  body: {
+    ...theme.typography.body,
+    color: theme.colors.text.primary,
+    lineHeight: 22,
+  },
+  commentSection: { marginTop: theme.spacing.xl },
+  commentText: {
+    ...theme.typography.body,
+    color: theme.colors.text.primary,
+    lineHeight: 20,
+  },
+  timestamp: {
+    ...theme.typography.caption,
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing.xl,
+  },
+  actionBtn: { marginTop: theme.spacing.xxl },
+  errorText: {
+    textAlign: 'center',
+    color: '#EF4444',
+    marginTop: 48,
+    padding: theme.spacing.lg,
+  },
 });
