@@ -41,11 +41,11 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface.card,
   },
   inputError: {
-    borderColor: '#DC2626',
+    borderColor: theme.colors.status.rejected.text,
   },
   error: {
     ...theme.typography.caption,
-    color: '#DC2626',
+    color: theme.colors.status.rejected.text,
     marginTop: 4,
   },
 });

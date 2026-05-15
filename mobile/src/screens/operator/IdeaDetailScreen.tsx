@@ -117,9 +117,10 @@ const styles = StyleSheet.create({
   },
   actionBtn: { marginTop: theme.spacing.xxl },
   errorText: {
+    ...theme.typography.body,
     textAlign: 'center',
     color: theme.colors.status.rejected.text,
-    marginTop: 48,
+    marginTop: theme.spacing.xxxl,
     padding: theme.spacing.lg,
   },
 });
