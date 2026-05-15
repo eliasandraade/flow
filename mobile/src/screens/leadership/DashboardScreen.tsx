@@ -1,12 +1,15 @@
 import React from 'react';
-import {
-  View, Text, StyleSheet, ScrollView,
-  ActivityIndicator, TouchableOpacity,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch, logout } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
-import { DashboardSummary, BlockedProject } from '../../types/api';
+import { BlockedProject, DashboardSummary } from '../../types/api';
+import { theme } from '../../theme';
+import { normalizeStatus } from '../../utils/normalizeStatus';
+import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { StatusBadge } from '../../components/StatusBadge';
 
 export function DashboardScreen() {
   const session = useAuthStore((s) => s.session);
@@ -18,7 +21,7 @@ export function DashboardScreen() {
   });
 
   if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color="#2563EB" />;
+    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
   }
   if (error || !data) {
     return (
@@ -33,124 +36,152 @@ export function DashboardScreen() {
   );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
+    <ScreenContainer scrollable>
       <Text style={styles.heading}>Innovation Overview</Text>
 
       <Text style={styles.sectionTitle}>Ideas</Text>
       <View style={styles.row}>
-        <MetricCard label="Total" value={data.totalIdeas} />
-        <MetricCard label="Approved" value={data.approvedIdeas} color="#059669" />
-        <MetricCard label="Rejected" value={data.rejectedIdeas} color="#DC2626" />
+        <KpiCard label="Total"         value={data.totalIdeas} />
+        <KpiCard label="Approved"      value={data.approvedIdeas}  color="#059669" />
+        <KpiCard label="Rejected"      value={data.rejectedIdeas}  color="#DC2626" />
       </View>
       <View style={styles.row}>
-        <MetricCard label="Pending Review" value={data.pendingIdeas} color="#D97706" />
-        <MetricCard
-          label="Conversion"
-          value={`${data.conversionRate.toFixed(1)}%`}
-          color="#2563EB"
-        />
+        <KpiCard label="Under Review"  value={data.pendingIdeas}   color="#D97706" />
+        <KpiCard label="Conversion"    value={`${data.conversionRate.toFixed(1)}%`} color={theme.colors.primary} />
       </View>
 
       <Text style={styles.sectionTitle}>Projects</Text>
       <View style={styles.row}>
-        <MetricCard label="Active" value={data.activeProjects} color="#2563EB" />
-        <MetricCard label="Blocked" value={data.blockedProjects} color="#DC2626" />
-        <MetricCard label="Completed" value={data.completedProjects} color="#059669" />
+        <KpiCard label="Active"        value={data.activeProjects}    color={theme.colors.primary} />
+        <KpiCard label="Blocked"       value={data.blockedProjects}   color="#C2410C" />
+        <KpiCard label="Completed"     value={data.completedProjects} color="#059669" />
       </View>
       <View style={styles.row}>
-        <MetricCard
-          label="Avg Completion"
-          value={`${data.averageCompletionDays}d`}
-        />
-        <MetricCard
+        <KpiCard label="Avg Completion" value={`${data.averageCompletionDays}d`} />
+        <KpiCard
           label="Bottleneck"
           value={`${data.bottleneckIndex.toFixed(1)}%`}
           color={data.bottleneckIndex > 30 ? '#DC2626' : '#059669'}
         />
-        <MetricCard
-          label="Total ROI"
-          value={`${data.totalRoi.toFixed(0)}%`}
-          color="#2563EB"
-        />
+        <KpiCard label="Total ROI"     value={`${data.totalRoi.toFixed(0)}%`} color={theme.colors.primary} />
       </View>
 
       {sortedBlocked.length > 0 && (
-        <>
+        <View style={styles.blockedSection}>
           <Text style={styles.sectionTitle}>Blocked Projects</Text>
           {sortedBlocked.map((p: BlockedProject) => (
-            <View key={p.id} style={styles.blockedCard}>
+            <Card key={p.id} style={styles.blockedCard} padding={theme.spacing.lg}>
               <View style={styles.blockedHeader}>
                 <Text style={styles.blockedTitle} numberOfLines={1}>{p.title}</Text>
-                <Text style={styles.blockedDays}>
-                  {p.daysBlocked}d
-                </Text>
+                <View style={styles.blockedMeta}>
+                  <Text style={styles.blockedDays}>{p.daysBlocked}d</Text>
+                  <StatusBadge status={normalizeStatus('Blocked')} />
+                </View>
               </View>
               <Text style={styles.blockedReason}>{p.blockedReason}</Text>
-            </View>
+            </Card>
           ))}
-        </>
+        </View>
       )}
 
-      <TouchableOpacity
-        style={styles.logoutBtn}
+      <Button
+        variant="secondary"
+        label="Sign Out"
         onPress={() => logout(session?.refreshToken ?? '')}
-      >
-        <Text style={styles.logoutText}>Sign Out</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        style={styles.logoutBtn}
+      />
+    </ScreenContainer>
   );
 }
 
-function MetricCard({
+function KpiCard({
   label,
   value,
-  color = '#111827',
+  color = theme.colors.text.primary,
 }: {
   label: string;
   value: string | number;
   color?: string;
 }) {
   return (
-    <View style={cardStyles.card}>
-      <Text style={[cardStyles.value, { color }]}>{value}</Text>
-      <Text style={cardStyles.label}>{label}</Text>
-    </View>
+    <Card style={styles.kpiCard} padding={theme.spacing.xl}>
+      <Text style={[styles.kpiValue, { color }]}>{value}</Text>
+      <Text style={styles.kpiLabel}>{label}</Text>
+    </Card>
   );
 }
 
-const cardStyles = StyleSheet.create({
-  card: {
-    flex: 1, backgroundColor: '#FFF', borderRadius: 8,
-    padding: 14, alignItems: 'center',
-    borderWidth: 1, borderColor: '#E5E7EB',
-  },
-  value: { fontSize: 22, fontWeight: 'bold', marginBottom: 4 },
-  label: { fontSize: 11, color: '#6B7280', textAlign: 'center' },
-});
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
-  heading: { fontSize: 22, fontWeight: 'bold', color: '#1E3A5F', marginBottom: 4 },
-  sectionTitle: {
-    fontSize: 14, fontWeight: '700', color: '#374151',
-    marginTop: 20, marginBottom: 10,
+  heading: {
+    ...theme.typography.heading,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
   },
-  row: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  sectionTitle: {
+    ...theme.typography.title,
+    color: theme.colors.text.primary,
+    marginTop: theme.spacing.xxl,
+    marginBottom: theme.spacing.md,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+    alignItems: 'stretch',
+  },
+  kpiCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kpiValue: {
+    ...theme.typography.kpi,
+    marginBottom: theme.spacing.xs,
+    textAlign: 'center',
+  },
+  kpiLabel: {
+    ...theme.typography.label,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+  },
+  blockedSection: { marginTop: theme.spacing.xxl },
   blockedCard: {
-    backgroundColor: '#FEF2F2', borderRadius: 8, padding: 12,
-    marginBottom: 8, borderWidth: 1, borderColor: '#FECACA',
+    marginBottom: theme.spacing.md,
+    backgroundColor: theme.colors.status.blocked.bg,
+    borderColor: '#FED7AA',
   },
   blockedHeader: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
   },
-  blockedTitle: { fontSize: 15, fontWeight: '600', color: '#111827', flex: 1, marginRight: 8 },
-  blockedDays: { fontSize: 13, color: '#DC2626', fontWeight: '600' },
-  blockedReason: { fontSize: 13, color: '#7F1D1D', lineHeight: 18 },
-  logoutBtn: {
-    marginTop: 32, borderRadius: 8, borderWidth: 1,
-    borderColor: '#D1D5DB', padding: 14, alignItems: 'center',
+  blockedTitle: {
+    ...theme.typography.title,
+    color: theme.colors.text.primary,
+    flex: 1,
+    marginRight: theme.spacing.sm,
   },
-  logoutText: { color: '#374151', fontWeight: '600' },
-  errorText: { textAlign: 'center', color: '#EF4444', marginTop: 48, padding: 16 },
+  blockedMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  blockedDays: {
+    ...theme.typography.label,
+    color: theme.colors.status.blocked.text,
+    fontWeight: '700',
+  },
+  blockedReason: {
+    ...theme.typography.label,
+    color: theme.colors.text.secondary,
+    lineHeight: 18,
+  },
+  logoutBtn: { marginTop: theme.spacing.xxl },
+  errorText: {
+    textAlign: 'center',
+    color: '#EF4444',
+    marginTop: 48,
+    padding: theme.spacing.lg,
+  },
 });
