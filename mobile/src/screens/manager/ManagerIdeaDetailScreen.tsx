@@ -174,9 +174,10 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.xxl,
   },
   errorText: {
+    ...theme.typography.body,
     textAlign: 'center',
-    color: '#EF4444',
-    marginTop: 48,
+    color: theme.colors.status.rejected.text,
+    marginTop: theme.spacing.xxxl,
     padding: theme.spacing.lg,
   },
 });

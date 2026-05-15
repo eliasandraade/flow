@@ -81,7 +81,7 @@ export function ProjectDetailScreen({ route }: any) {
       </View>
 
       <View style={styles.actionsSection}>
-        {project.status === 'Planning' && (
+        {project.status === 'Planned' && (
           <Button
             variant="primary"
             size="lg"
@@ -186,9 +186,10 @@ const styles = StyleSheet.create({
   inProgressActions: { gap: theme.spacing.lg },
   blockSection: { marginTop: theme.spacing.lg, gap: theme.spacing.sm },
   errorText: {
+    ...theme.typography.body,
     textAlign: 'center',
-    color: '#EF4444',
-    marginTop: 48,
+    color: theme.colors.status.rejected.text,
+    marginTop: theme.spacing.xxxl,
     padding: theme.spacing.lg,
   },
 });

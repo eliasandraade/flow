@@ -42,26 +42,26 @@ export function DashboardScreen() {
       <Text style={styles.sectionTitle}>Ideas</Text>
       <View style={styles.row}>
         <KpiCard label="Total"         value={data.totalIdeas} />
-        <KpiCard label="Approved"      value={data.approvedIdeas}  color="#059669" />
-        <KpiCard label="Rejected"      value={data.rejectedIdeas}  color="#DC2626" />
+        <KpiCard label="Approved"      value={data.approvedIdeas}  color={theme.colors.success} />
+        <KpiCard label="Rejected"      value={data.rejectedIdeas}  color={theme.colors.danger} />
       </View>
       <View style={styles.row}>
-        <KpiCard label="Under Review"  value={data.pendingIdeas}   color="#D97706" />
+        <KpiCard label="Under Review"  value={data.pendingIdeas}   color={theme.colors.status.underReview.text} />
         <KpiCard label="Conversion"    value={`${data.conversionRate.toFixed(1)}%`} color={theme.colors.primary} />
       </View>
 
       <Text style={styles.sectionTitle}>Projects</Text>
       <View style={styles.row}>
         <KpiCard label="Active"        value={data.activeProjects}    color={theme.colors.primary} />
-        <KpiCard label="Blocked"       value={data.blockedProjects}   color="#C2410C" />
-        <KpiCard label="Completed"     value={data.completedProjects} color="#059669" />
+        <KpiCard label="Blocked"       value={data.blockedProjects}   color={theme.colors.status.blocked.text} />
+        <KpiCard label="Completed"     value={data.completedProjects} color={theme.colors.success} />
       </View>
       <View style={styles.row}>
         <KpiCard label="Avg Completion" value={`${data.averageCompletionDays}d`} />
         <KpiCard
           label="Bottleneck"
           value={`${data.bottleneckIndex.toFixed(1)}%`}
-          color={data.bottleneckIndex > 30 ? '#DC2626' : '#059669'}
+          color={data.bottleneckIndex > 30 ? theme.colors.danger : theme.colors.success}
         />
         <KpiCard label="Total ROI"     value={`${data.totalRoi.toFixed(0)}%`} color={theme.colors.primary} />
       </View>
@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
   blockedCard: {
     marginBottom: theme.spacing.md,
     backgroundColor: theme.colors.status.blocked.bg,
-    borderColor: '#FED7AA',
+    borderColor: theme.colors.status.blocked.border,
   },
   blockedHeader: {
     flexDirection: 'row',
@@ -179,9 +179,10 @@ const styles = StyleSheet.create({
   },
   logoutBtn: { marginTop: theme.spacing.xxl },
   errorText: {
+    ...theme.typography.body,
     textAlign: 'center',
-    color: '#EF4444',
-    marginTop: 48,
+    color: theme.colors.status.rejected.text,
+    marginTop: theme.spacing.xxxl,
     padding: theme.spacing.lg,
   },
 });

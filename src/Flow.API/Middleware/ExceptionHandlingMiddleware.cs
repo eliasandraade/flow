@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Flow.Application.Common.Exceptions;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Flow.API.Middleware;
 
@@ -57,13 +58,18 @@ public class ExceptionHandlingMiddleware
         if (statusCode == HttpStatusCode.InternalServerError)
             _logger.LogError(exception, "Unhandled exception.");
 
-        context.Response.ContentType = "application/json";
+        var problem = new ProblemDetails
+        {
+            Title = title,
+            Status = (int)statusCode,
+        };
+
+        if (errors is not null)
+            problem.Extensions["errors"] = errors;
+
+        context.Response.ContentType = "application/problem+json";
         context.Response.StatusCode = (int)statusCode;
 
-        var body = JsonSerializer.Serialize(
-            new { title, status = (int)statusCode, errors },
-            JsonOptions);
-
-        await context.Response.WriteAsync(body);
+        await context.Response.WriteAsync(JsonSerializer.Serialize(problem, JsonOptions));
     }
 }

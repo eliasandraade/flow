@@ -23,8 +23,8 @@ interface Props {
 
 const VARIANT_STYLES: Record<Variant, { bg: string; text: string; border?: string }> = {
   primary:   { bg: theme.colors.primary,      text: theme.colors.text.inverse },
-  success:   { bg: '#059669',                 text: theme.colors.text.inverse },
-  danger:    { bg: '#DC2626',                 text: theme.colors.text.inverse },
+  success:   { bg: theme.colors.success,      text: theme.colors.text.inverse },
+  danger:    { bg: theme.colors.danger,       text: theme.colors.text.inverse },
   secondary: { bg: theme.colors.surface.card, text: theme.colors.text.primary, border: theme.colors.surface.border },
 };
 

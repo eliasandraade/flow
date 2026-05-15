@@ -16,10 +16,11 @@ public interface IApplicationDbContext
     DbSet<PointLedgerEntry> PointLedgerEntries { get; }
     DbSet<Result> Results { get; }
 
+    // Reserved for infrastructure operations that do not produce domain audit events (e.g. auth token management).
+    // Domain state transitions MUST use SaveChangesWithAuditAsync.
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
-    // Atomically appends auditEntries and saves all pending changes in one transaction.
-    // All domain operations that produce audit events must call this instead of SaveChangesAsync.
+    // Atomically persists all pending changes and the provided audit entries in one transaction.
     Task<int> SaveChangesWithAuditAsync(
         IEnumerable<AuditLog> auditEntries,
         CancellationToken cancellationToken = default);

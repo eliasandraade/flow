@@ -3,6 +3,7 @@ export type StatusKey =
   | 'underReview'
   | 'approved'
   | 'rejected'
+  | 'planned'
   | 'inProgress'
   | 'blocked'
   | 'completed'
@@ -13,6 +14,7 @@ const STATUS_MAP: Record<string, StatusKey> = {
   UnderReview: 'underReview',
   Approved:    'approved',
   Rejected:    'rejected',
+  Planned:     'planned',
   InProgress:  'inProgress',
   Blocked:     'blocked',
   Completed:   'completed',

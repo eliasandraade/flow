@@ -2,6 +2,8 @@ export const theme = {
   colors: {
     primary: '#2563EB',
     primarySurface: '#EEF2FF',
+    success: '#059669',
+    danger: '#DC2626',
     text: {
       primary: '#111827',
       secondary: '#6B7280',
@@ -15,14 +17,15 @@ export const theme = {
       inputBorder: '#D1D5DB',
     },
     status: {
-      draft:       { bg: '#F3F4F6', text: '#6B7280' },
-      underReview: { bg: '#FFFBEB', text: '#D97706' },
-      approved:    { bg: '#ECFDF5', text: '#059669' },
-      rejected:    { bg: '#FEF2F2', text: '#DC2626' },
-      inProgress:  { bg: '#EEF2FF', text: '#2563EB' },
-      blocked:     { bg: '#FFF7ED', text: '#C2410C' },
-      completed:   { bg: '#ECFDF5', text: '#059669' },
-      cancelled:   { bg: '#F3F4F6', text: '#6B7280' },
+      draft:       { bg: '#F3F4F6', text: '#6B7280', border: '#E5E7EB' },
+      underReview: { bg: '#FFFBEB', text: '#D97706', border: '#FCD34D' },
+      approved:    { bg: '#ECFDF5', text: '#059669', border: '#6EE7B7' },
+      rejected:    { bg: '#FEF2F2', text: '#DC2626', border: '#FECACA' },
+      planned:     { bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD' },
+      inProgress:  { bg: '#EEF2FF', text: '#2563EB', border: '#C7D2FE' },
+      blocked:     { bg: '#FFF7ED', text: '#C2410C', border: '#FED7AA' },
+      completed:   { bg: '#ECFDF5', text: '#059669', border: '#6EE7B7' },
+      cancelled:   { bg: '#F3F4F6', text: '#6B7280', border: '#E5E7EB' },
     },
   },
   typography: {

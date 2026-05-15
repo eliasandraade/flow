@@ -63,7 +63,7 @@ export function IdeaQueueScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   card: { marginBottom: theme.spacing.md },
   cardHighlight: {
-    borderColor: '#FCD34D',
+    borderColor: theme.colors.status.underReview.border,
     backgroundColor: theme.colors.status.underReview.bg,
   },
   cardTitle: {
@@ -89,13 +89,13 @@ const styles = StyleSheet.create({
     ...theme.typography.body,
     color: theme.colors.text.muted,
     textAlign: 'center',
-    marginTop: 48,
+    marginTop: theme.spacing.xxxl,
   },
   errorText: {
     ...theme.typography.body,
     textAlign: 'center',
-    color: '#EF4444',
-    marginTop: 48,
+    color: theme.colors.status.rejected.text,
+    marginTop: theme.spacing.xxxl,
     padding: theme.spacing.lg,
   },
 });

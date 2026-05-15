@@ -1,9 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../store/authStore';
 
-// Android emulator: http://10.0.2.2:5153/api/v1
-// iOS simulator / local machine: http://localhost:5153/api/v1
-// Real device on LAN: replace with your machine's LAN IP
 export const API_BASE = 'http://10.0.2.2:5153/api/v1';
 
 const STORE_KEYS = ['accessToken', 'refreshToken', 'userId', 'name', 'email', 'role'] as const;

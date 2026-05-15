@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from './src/store/authStore';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { theme } from './src/theme';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -35,7 +36,7 @@ export default function App() {
   if (!hydrated) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#2563EB" />
+        <ActivityIndicator size="large" color={theme.colors.primary} />
       </View>
     );
   }

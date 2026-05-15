@@ -8,6 +8,7 @@ const DISPLAY_LABELS: Record<StatusKey, string> = {
   underReview: 'Under Review',
   approved:    'Approved',
   rejected:    'Rejected',
+  planned:     'Planned',
   inProgress:  'In Progress',
   blocked:     'Blocked',
   completed:   'Completed',
