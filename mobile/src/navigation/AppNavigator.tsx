@@ -1,17 +1,23 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuthStore } from '../store/authStore';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { MyIdeasScreen } from '../screens/operator/MyIdeasScreen';
 import { SubmitIdeaScreen } from '../screens/operator/SubmitIdeaScreen';
 import { IdeaDetailScreen } from '../screens/operator/IdeaDetailScreen';
-import { PlaceholderManagerScreen } from '../screens/manager/PlaceholderManagerScreen';
+import { IdeaQueueScreen } from '../screens/manager/IdeaQueueScreen';
+import { ManagerIdeaDetailScreen } from '../screens/manager/ManagerIdeaDetailScreen';
+import { ProjectListScreen } from '../screens/manager/ProjectListScreen';
+import { ProjectDetailScreen } from '../screens/manager/ProjectDetailScreen';
 import { PlaceholderLeadershipScreen } from '../screens/leadership/PlaceholderLeadershipScreen';
 
 const AuthStack = createNativeStackNavigator();
 const OperatorStack = createNativeStackNavigator();
-const ManagerStack = createNativeStackNavigator();
+const ManagerIdeasStack = createNativeStackNavigator();
+const ManagerProjectsStack = createNativeStackNavigator();
+const ManagerTabs = createBottomTabNavigator();
 const LeadershipStack = createNativeStackNavigator();
 
 function AuthNavigator() {
@@ -44,15 +50,54 @@ function OperatorNavigator() {
   );
 }
 
+function ManagerIdeasNavigator() {
+  return (
+    <ManagerIdeasStack.Navigator>
+      <ManagerIdeasStack.Screen
+        name="IdeaQueue"
+        component={IdeaQueueScreen}
+        options={{ title: 'Ideas' }}
+      />
+      <ManagerIdeasStack.Screen
+        name="ManagerIdeaDetail"
+        component={ManagerIdeaDetailScreen}
+        options={{ title: 'Idea Review' }}
+      />
+    </ManagerIdeasStack.Navigator>
+  );
+}
+
+function ManagerProjectsNavigator() {
+  return (
+    <ManagerProjectsStack.Navigator>
+      <ManagerProjectsStack.Screen
+        name="ProjectList"
+        component={ProjectListScreen}
+        options={{ title: 'Projects' }}
+      />
+      <ManagerProjectsStack.Screen
+        name="ProjectDetail"
+        component={ProjectDetailScreen}
+        options={{ title: 'Project' }}
+      />
+    </ManagerProjectsStack.Navigator>
+  );
+}
+
 function ManagerNavigator() {
   return (
-    <ManagerStack.Navigator>
-      <ManagerStack.Screen
-        name="ManagerHome"
-        component={PlaceholderManagerScreen}
-        options={{ title: 'Manager' }}
+    <ManagerTabs.Navigator>
+      <ManagerTabs.Screen
+        name="Ideas"
+        component={ManagerIdeasNavigator}
+        options={{ headerShown: false }}
       />
-    </ManagerStack.Navigator>
+      <ManagerTabs.Screen
+        name="Projects"
+        component={ManagerProjectsNavigator}
+        options={{ headerShown: false }}
+      />
+    </ManagerTabs.Navigator>
   );
 }
 
