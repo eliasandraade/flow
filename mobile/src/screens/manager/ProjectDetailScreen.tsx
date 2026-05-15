@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Alert, TextInput,
-} from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
 import { ProjectDetail } from '../../types/api';
+import { theme } from '../../theme';
+import { normalizeStatus } from '../../utils/normalizeStatus';
+import { Button } from '../../components/Button';
+import { FormInput } from '../../components/FormInput';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { StatusBadge } from '../../components/StatusBadge';
 
 export function ProjectDetailScreen({ route }: any) {
   const { id } = route.params as { id: string };
@@ -35,17 +38,17 @@ export function ProjectDetailScreen({ route }: any) {
   }
 
   if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color="#2563EB" />;
+    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
   }
   if (error || !project) {
     return <Text style={styles.errorText}>{(error as Error)?.message ?? 'Not found'}</Text>;
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
+    <ScreenContainer scrollable>
       <Text style={styles.title}>{project.title}</Text>
       <View style={styles.metaRow}>
-        <Text style={styles.badge}>{project.status}</Text>
+        <StatusBadge status={normalizeStatus(project.status)} />
         <Text style={styles.priority}>{project.priority}</Text>
       </View>
 
@@ -53,106 +56,139 @@ export function ProjectDetailScreen({ route }: any) {
       <Text style={styles.body}>{project.description}</Text>
 
       {project.blockedReason ? (
-        <>
+        <View style={styles.section}>
           <Text style={styles.sectionLabel}>Blocked Reason</Text>
           <View style={styles.blockedBox}>
             <Text style={styles.blockedText}>{project.blockedReason}</Text>
           </View>
-        </>
+        </View>
       ) : null}
 
-      {project.estimatedCost != null && (
-        <Text style={styles.meta}>Estimated Cost: ${project.estimatedCost.toLocaleString()}</Text>
-      )}
-      {project.deadline && (
-        <Text style={styles.meta}>Deadline: {new Date(project.deadline).toLocaleDateString()}</Text>
-      )}
-      {project.startDate && (
-        <Text style={styles.meta}>Started: {new Date(project.startDate).toLocaleDateString()}</Text>
-      )}
-      {project.completedAt && (
-        <Text style={styles.meta}>Completed: {new Date(project.completedAt).toLocaleDateString()}</Text>
-      )}
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Details</Text>
+        {project.estimatedCost != null && (
+          <Text style={styles.meta}>Estimated Cost: ${project.estimatedCost.toLocaleString()}</Text>
+        )}
+        {project.deadline && (
+          <Text style={styles.meta}>Deadline: {new Date(project.deadline).toLocaleDateString()}</Text>
+        )}
+        {project.startDate && (
+          <Text style={styles.meta}>Started: {new Date(project.startDate).toLocaleDateString()}</Text>
+        )}
+        {project.completedAt && (
+          <Text style={styles.meta}>Completed: {new Date(project.completedAt).toLocaleDateString()}</Text>
+        )}
+      </View>
 
-      {actionLoading && (
-        <ActivityIndicator size="large" color="#2563EB" style={{ marginTop: 20 }} />
-      )}
-
-      {!actionLoading && project.status === 'Planning' && (
-        <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: '#2563EB' }]}
-          onPress={() => callAction(`/projects/${id}/start`)}
-        >
-          <Text style={styles.actionBtnText}>Start Project</Text>
-        </TouchableOpacity>
-      )}
-
-      {!actionLoading && project.status === 'InProgress' && (
-        <View>
-          <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: '#059669' }]}
-            onPress={() => callAction(`/projects/${id}/complete`)}
-          >
-            <Text style={styles.actionBtnText}>Mark Complete</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.sectionLabel}>Block Reason *</Text>
-          <TextInput
-            style={styles.input}
-            value={blockReason}
-            onChangeText={setBlockReason}
-            placeholder="Why is this project blocked?"
-            multiline
-            numberOfLines={2}
+      <View style={styles.actionsSection}>
+        {project.status === 'Planning' && (
+          <Button
+            variant="primary"
+            size="lg"
+            label="Start Project"
+            onPress={() => callAction(`/projects/${id}/start`)}
+            loading={actionLoading}
           />
-          <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: '#DC2626' }]}
-            onPress={() => {
-              if (!blockReason.trim()) {
-                Alert.alert('Validation', 'A block reason is required.');
-                return;
-              }
-              callAction(`/projects/${id}/block`, { reason: blockReason });
-            }}
-          >
-            <Text style={styles.actionBtnText}>Block Project</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
 
-      {!actionLoading && project.status === 'Blocked' && (
-        <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: '#D97706' }]}
-          onPress={() => callAction(`/projects/${id}/unblock`)}
-        >
-          <Text style={styles.actionBtnText}>Unblock Project</Text>
-        </TouchableOpacity>
-      )}
-    </ScrollView>
+        {project.status === 'InProgress' && (
+          <View style={styles.inProgressActions}>
+            <Button
+              variant="success"
+              size="lg"
+              label="Mark Complete"
+              onPress={() => callAction(`/projects/${id}/complete`)}
+              loading={actionLoading}
+            />
+            <View style={styles.blockSection}>
+              <FormInput
+                label="Block Reason *"
+                value={blockReason}
+                onChangeText={setBlockReason}
+                placeholder="Why is this project blocked?"
+                multiline
+                numberOfLines={2}
+                textAlignVertical="top"
+                inputStyle={{ minHeight: 60 }}
+              />
+              <Button
+                variant="danger"
+                label="Block Project"
+                onPress={() => {
+                  if (!blockReason.trim()) {
+                    Alert.alert('Validation', 'A block reason is required.');
+                    return;
+                  }
+                  callAction(`/projects/${id}/block`, { reason: blockReason });
+                }}
+                loading={actionLoading}
+              />
+            </View>
+          </View>
+        )}
+
+        {project.status === 'Blocked' && (
+          <Button
+            variant="success"
+            size="lg"
+            label="Unblock Project"
+            onPress={() => callAction(`/projects/${id}/unblock`)}
+            loading={actionLoading}
+          />
+        )}
+      </View>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
-  title: { fontSize: 20, fontWeight: 'bold', color: '#111827', marginBottom: 8 },
-  metaRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  badge: {
-    backgroundColor: '#EEF2FF', color: '#4338CA',
-    paddingHorizontal: 10, paddingVertical: 3,
-    borderRadius: 12, fontSize: 13, fontWeight: '500',
+  title: {
+    ...theme.typography.title,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.sm,
   },
-  priority: { color: '#6B7280', fontSize: 13, alignSelf: 'center' },
-  sectionLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginTop: 16, marginBottom: 4 },
-  body: { fontSize: 15, color: '#374151', lineHeight: 22 },
-  blockedBox: { backgroundColor: '#FEF2F2', borderRadius: 6, padding: 10, marginTop: 4 },
-  blockedText: { color: '#DC2626', fontSize: 14 },
-  meta: { color: '#6B7280', fontSize: 13, marginTop: 6 },
-  input: {
-    borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
-    padding: 12, backgroundColor: '#FFF', fontSize: 15,
-    minHeight: 60, textAlignVertical: 'top', marginTop: 4,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.xl,
   },
-  actionBtn: { borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 14 },
-  actionBtnText: { color: '#FFF', fontWeight: '600', fontSize: 15 },
-  errorText: { textAlign: 'center', color: '#EF4444', marginTop: 48, padding: 16 },
+  priority: {
+    ...theme.typography.label,
+    color: theme.colors.text.secondary,
+  },
+  sectionLabel: {
+    ...theme.typography.label,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing.xs,
+  },
+  body: {
+    ...theme.typography.body,
+    color: theme.colors.text.primary,
+    lineHeight: 22,
+  },
+  section: { marginTop: theme.spacing.xxl },
+  blockedBox: {
+    backgroundColor: theme.colors.status.blocked.bg,
+    borderRadius: theme.radius.md,
+    padding: theme.spacing.md,
+  },
+  blockedText: {
+    ...theme.typography.body,
+    color: theme.colors.status.blocked.text,
+  },
+  meta: {
+    ...theme.typography.label,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing.sm,
+  },
+  actionsSection: { marginTop: theme.spacing.xxl },
+  inProgressActions: { gap: theme.spacing.lg },
+  blockSection: { marginTop: theme.spacing.lg, gap: theme.spacing.sm },
+  errorText: {
+    textAlign: 'center',
+    color: '#EF4444',
+    marginTop: 48,
+    padding: theme.spacing.lg,
+  },
 });
