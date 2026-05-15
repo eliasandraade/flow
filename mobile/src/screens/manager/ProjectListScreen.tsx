@@ -1,20 +1,15 @@
 import React from 'react';
-import {
-  View, Text, FlatList, TouchableOpacity,
-  StyleSheet, ActivityIndicator,
-} from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch, logout } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import { ProjectSummary } from '../../types/api';
-
-const STATUS_COLORS: Record<string, string> = {
-  Planning: '#6B7280',
-  InProgress: '#2563EB',
-  Blocked: '#DC2626',
-  Completed: '#059669',
-  Cancelled: '#9CA3AF',
-};
+import { theme } from '../../theme';
+import { normalizeStatus } from '../../utils/normalizeStatus';
+import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { StatusBadge } from '../../components/StatusBadge';
 
 export function ProjectListScreen({ navigation }: any) {
   const session = useAuthStore((s) => s.session);
@@ -25,68 +20,92 @@ export function ProjectListScreen({ navigation }: any) {
   });
 
   if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color="#2563EB" />;
+    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
   }
   if (error) {
     return <Text style={styles.errorText}>{(error as Error).message}</Text>;
   }
 
   return (
-    <View style={styles.container}>
+    <ScreenContainer>
       <FlatList
         data={projects ?? []}
         keyExtractor={(item) => item.id}
         onRefresh={() => { refetch(); }}
         refreshing={isFetching}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.card, item.status === 'Blocked' && styles.cardBlocked]}
+          <Card
             onPress={() => navigation.navigate('ProjectDetail', { id: item.id })}
+            style={[
+              styles.card,
+              ...(item.status === 'Blocked' ? [styles.cardBlocked] : []),
+            ]}
           >
             <Text style={styles.cardTitle}>{item.title}</Text>
-            <View style={styles.metaRow}>
-              <Text style={[styles.status, { color: STATUS_COLORS[item.status] ?? '#6B7280' }]}>
-                {item.status}
-              </Text>
-              <Text style={styles.priority}>{item.priority}</Text>
-            </View>
-            {item.blockedReason && (
+            {item.blockedReason ? (
               <Text style={styles.blockedReason} numberOfLines={1}>
-                ⚠ {item.blockedReason}
+                {item.blockedReason}
               </Text>
-            )}
-          </TouchableOpacity>
+            ) : null}
+            <View style={styles.cardFooter}>
+              <Text style={styles.priority}>{item.priority}</Text>
+              <StatusBadge status={normalizeStatus(item.status)} />
+            </View>
+          </Card>
         )}
         ListEmptyComponent={
           <Text style={styles.emptyText}>No projects yet.</Text>
         }
-        contentContainerStyle={{ paddingBottom: 24 }}
+        contentContainerStyle={{ paddingTop: theme.spacing.lg, paddingBottom: theme.spacing.xl }}
+        showsVerticalScrollIndicator={false}
       />
-
-      <TouchableOpacity
-        style={styles.logoutBtn}
+      <Button
+        variant="secondary"
+        label="Sign Out"
         onPress={() => logout(session?.refreshToken ?? '')}
-      >
-        <Text style={styles.logoutText}>Sign Out</Text>
-      </TouchableOpacity>
-    </View>
+        style={styles.logoutBtn}
+      />
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
-  card: {
-    backgroundColor: '#FFF', borderRadius: 8, padding: 14,
-    marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB',
+  card: { marginBottom: theme.spacing.md },
+  cardBlocked: {
+    borderColor: '#FED7AA',
+    backgroundColor: theme.colors.status.blocked.bg,
   },
-  cardBlocked: { borderColor: '#FECACA', backgroundColor: '#FEF2F2' },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: '#111827', marginBottom: 6 },
-  metaRow: { flexDirection: 'row', gap: 8 },
-  status: { fontSize: 13, fontWeight: '600' },
-  priority: { color: '#6B7280', fontSize: 12, alignSelf: 'center' },
-  blockedReason: { color: '#DC2626', fontSize: 12, marginTop: 6 },
-  emptyText: { textAlign: 'center', color: '#9CA3AF', marginTop: 48, fontSize: 15 },
-  errorText: { textAlign: 'center', color: '#EF4444', marginTop: 48, padding: 16 },
-  logoutBtn: { alignItems: 'center', padding: 14, marginTop: 8 },
-  logoutText: { color: '#6B7280', fontSize: 14 },
+  cardTitle: {
+    ...theme.typography.title,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
+  },
+  blockedReason: {
+    ...theme.typography.label,
+    color: theme.colors.status.blocked.text,
+    marginBottom: theme.spacing.sm,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  priority: {
+    ...theme.typography.caption,
+    color: theme.colors.text.muted,
+  },
+  emptyText: {
+    ...theme.typography.body,
+    color: theme.colors.text.muted,
+    textAlign: 'center',
+    marginTop: 48,
+  },
+  errorText: {
+    ...theme.typography.body,
+    textAlign: 'center',
+    color: '#EF4444',
+    marginTop: 48,
+    padding: theme.spacing.lg,
+  },
+  logoutBtn: { marginTop: theme.spacing.sm, marginBottom: theme.spacing.lg },
 });
