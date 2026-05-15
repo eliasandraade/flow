@@ -3,7 +3,9 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import { LoginScreen } from '../screens/auth/LoginScreen';
-import { PlaceholderOperatorScreen } from '../screens/operator/PlaceholderOperatorScreen';
+import { MyIdeasScreen } from '../screens/operator/MyIdeasScreen';
+import { SubmitIdeaScreen } from '../screens/operator/SubmitIdeaScreen';
+import { IdeaDetailScreen } from '../screens/operator/IdeaDetailScreen';
 import { PlaceholderManagerScreen } from '../screens/manager/PlaceholderManagerScreen';
 import { PlaceholderLeadershipScreen } from '../screens/leadership/PlaceholderLeadershipScreen';
 
@@ -24,9 +26,19 @@ function OperatorNavigator() {
   return (
     <OperatorStack.Navigator>
       <OperatorStack.Screen
-        name="OperatorHome"
-        component={PlaceholderOperatorScreen}
+        name="MyIdeas"
+        component={MyIdeasScreen}
         options={{ title: 'My Ideas' }}
+      />
+      <OperatorStack.Screen
+        name="SubmitIdea"
+        component={SubmitIdeaScreen}
+        options={{ title: 'Submit Idea' }}
+      />
+      <OperatorStack.Screen
+        name="IdeaDetail"
+        component={IdeaDetailScreen}
+        options={{ title: 'Idea' }}
       />
     </OperatorStack.Navigator>
   );
