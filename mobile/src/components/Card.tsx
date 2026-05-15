@@ -5,7 +5,7 @@ import { theme } from '../theme';
 interface Props {
   children: React.ReactNode;
   onPress?: () => void;
-  style?: ViewStyle;
+  style?: ViewStyle | ViewStyle[];
   padding?: number;
 }
 
