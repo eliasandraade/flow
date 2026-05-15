@@ -1,0 +1,51 @@
+export const theme = {
+  colors: {
+    primary: '#2563EB',
+    primarySurface: '#EEF2FF',
+    text: {
+      primary: '#111827',
+      secondary: '#6B7280',
+      muted: '#9CA3AF',
+      inverse: '#FFFFFF',
+    },
+    surface: {
+      background: '#F9FAFB',
+      card: '#FFFFFF',
+      border: '#E5E7EB',
+      inputBorder: '#D1D5DB',
+    },
+    status: {
+      draft:       { bg: '#F3F4F6', text: '#6B7280' },
+      underReview: { bg: '#FFFBEB', text: '#D97706' },
+      approved:    { bg: '#ECFDF5', text: '#059669' },
+      rejected:    { bg: '#FEF2F2', text: '#DC2626' },
+      inProgress:  { bg: '#EEF2FF', text: '#2563EB' },
+      blocked:     { bg: '#FFF7ED', text: '#C2410C' },
+      completed:   { bg: '#ECFDF5', text: '#059669' },
+      cancelled:   { bg: '#F3F4F6', text: '#6B7280' },
+    },
+  },
+  typography: {
+    display: { fontSize: 36, fontWeight: '700' as const },
+    heading: { fontSize: 22, fontWeight: '700' as const },
+    title:   { fontSize: 18, fontWeight: '600' as const },
+    body:    { fontSize: 15, fontWeight: '400' as const },
+    label:   { fontSize: 13, fontWeight: '500' as const },
+    caption: { fontSize: 12, fontWeight: '400' as const },
+    kpi:     { fontSize: 32, fontWeight: '700' as const },
+  },
+  spacing: {
+    xs:  4,
+    sm:  8,
+    md:  12,
+    lg:  16,
+    xl:  24,
+    xxl: 32,
+  },
+  radius: {
+    sm:   6,
+    md:   8,
+    lg:   12,
+    full: 999,
+  },
+} as const;
