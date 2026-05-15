@@ -18,7 +18,7 @@ const STATUS_COLORS: Record<string, string> = {
 export function MyIdeasScreen({ navigation }: any) {
   const session = useAuthStore((s) => s.session);
 
-  const { data: ideas, isLoading, error, refetch } = useQuery<IdeaSummary[]>({
+  const { data: ideas, isLoading, isFetching, error, refetch } = useQuery<IdeaSummary[]>({
     queryKey: ['ideas'],
     queryFn: () => apiFetch<IdeaSummary[]>('/ideas'),
   });
@@ -42,8 +42,8 @@ export function MyIdeasScreen({ navigation }: any) {
       <FlatList
         data={ideas ?? []}
         keyExtractor={(item) => item.id}
-        onRefresh={refetch}
-        refreshing={isLoading}
+        onRefresh={() => { refetch(); }}
+        refreshing={isFetching}
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.card}
