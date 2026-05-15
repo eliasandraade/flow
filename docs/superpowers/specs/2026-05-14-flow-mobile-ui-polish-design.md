@@ -85,19 +85,58 @@ radius: {
 
 ---
 
+## 1.5 Status Normalization (`src/utils/normalizeStatus.ts`)
+
+The backend returns status values in PascalCase (e.g. `"UnderReview"`, `"InProgress"`).
+The UI theme uses camelCase keys (e.g. `"underReview"`, `"inProgress"`).
+A normalization utility converts backend values before they reach `StatusBadge`.
+
+```typescript
+// Exhaustive mapping — new backend values are caught at the call site as TS errors
+const STATUS_MAP: Record<string, StatusKey> = {
+  Draft:       'draft',
+  UnderReview: 'underReview',
+  Approved:    'approved',
+  Rejected:    'rejected',
+  InProgress:  'inProgress',
+  Blocked:     'blocked',
+  Completed:   'completed',
+  Cancelled:   'cancelled',
+};
+
+export function normalizeStatus(raw: string): StatusKey {
+  const key = STATUS_MAP[raw];
+  if (!key) {
+    if (__DEV__) console.warn(`[normalizeStatus] Unknown status: "${raw}". Falling back to 'draft'.`);
+    return 'draft';
+  }
+  return key;
+}
+```
+
+`StatusKey` is the same union type used in `StatusBadge.tsx`.
+Every screen calls `normalizeStatus(item.status)` before passing the value to `StatusBadge`.
+This is the single point of truth for the PascalCase → camelCase mapping.
+
+---
+
 ## 2. Shared Components (`src/components/`)
 
 Five files. No new libraries. All built on React Native primitives + `theme`.
 
 ### 2.1 `ScreenContainer.tsx`
 
-Wraps every screen's root view. Provides consistent background color and horizontal padding.
+Wraps every screen's root view. Provides safe-area awareness, consistent background color, and horizontal padding.
 
 ```
 Props:
   children:     ReactNode
   style?:       ViewStyle
   scrollable?:  boolean  (default false — wraps in ScrollView when true)
+
+Root element: SafeAreaView (from react-native-safe-area-context)
+  — avoids notch, status bar, and home indicator overlap on all devices
+  — edges: ['top', 'left', 'right', 'bottom']
 
 Layout:
   flex: 1
@@ -133,6 +172,8 @@ Loading state:
   — label hidden (opacity 0, kept in layout to prevent width shift)
   — ActivityIndicator centered absolutely, color matches text color for that variant
   — button is non-interactive while loading
+  — onPress is suppressed when loading=true (guard in the handler, not just via disabled)
+    to prevent double-trigger on rapid taps before state propagates
 
 Disabled:
   — opacity: 0.5
@@ -191,8 +232,13 @@ Shadow (visual lift):
   iOS:     shadowColor '#000', shadowOffset {0,1}, shadowOpacity 0.06, shadowRadius 3
   Android: elevation 2
 
-When onPress provided: wraps children in TouchableOpacity (activeOpacity: 0.7)
+When onPress provided: wraps children in TouchableOpacity (activeOpacity: 0.7, minHeight: 64)
 When no onPress: plain View
+
+Accessibility:
+  — TouchableOpacity minHeight: 64 ensures adequate touch target for list item cards
+  — applies to all Card instances used in lists (MyIdeasScreen, IdeaQueueScreen,
+    ProjectListScreen, DashboardScreen blocked rows)
 ```
 
 ### 2.5 `FormInput.tsx`
@@ -368,7 +414,8 @@ Action hierarchy: Approve (success) is the primary positive action. Reject (dang
 
 | Element | Before | After |
 |---|---|---|
-| KPI grid | inline cards | 2-column `Card` grid, padding `xl` |
+| KPI grid | inline cards | 2-column `Card` grid, padding `xl`, `alignItems: 'stretch'` on row so all cards equal height |
+| KPI card content | varies | `justifyContent: 'center'` inside card so number + label are vertically centered |
 | KPI number | ad hoc fontSize | `typography.kpi` (32px, bold), `text.primary` |
 | KPI label | ad hoc | `typography.label`, `text.secondary` |
 | KPI sub-text | ad hoc | `typography.caption`, `text.muted` |
@@ -386,6 +433,7 @@ Action hierarchy: Approve (success) is the primary positive action. Reject (dang
 
 ```
 mobile/src/theme.ts
+mobile/src/utils/normalizeStatus.ts
 mobile/src/components/ScreenContainer.tsx
 mobile/src/components/Button.tsx
 mobile/src/components/StatusBadge.tsx
@@ -416,11 +464,13 @@ mobile/src/screens/leadership/DashboardScreen.tsx
 A screen is complete when:
 
 1. All hardcoded color/font/spacing values are replaced with `theme` references
-2. `ScreenContainer` is the outermost element
-3. Cards use the `Card` component
-4. Status badges use `StatusBadge`
-5. Buttons use `Button` with the correct variant
-6. Form inputs use `FormInput`
-7. Section spacing follows the `xxl`/`xl` hierarchy
-8. List items follow the `title → metadata → badge` hierarchy
-9. No more than one `primary` button variant appears on the screen
+2. `ScreenContainer` (SafeAreaView-based) is the outermost element
+3. Cards use the `Card` component; list-item cards have `minHeight: 64` touch target
+4. Status values are normalized via `normalizeStatus()` before reaching `StatusBadge`
+5. Status badges use `StatusBadge` with the normalized camelCase key
+6. Buttons use `Button` with the correct variant; loading prop suppresses double-tap
+7. Form inputs use `FormInput`
+8. Section spacing follows the `xxl`/`xl` hierarchy
+9. List items follow the `title → metadata → badge` hierarchy
+10. No more than one `primary` button variant appears on the screen
+11. Dashboard KPI rows use `alignItems: 'stretch'`; KPI card content uses `justifyContent: 'center'`
