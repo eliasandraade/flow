@@ -11,7 +11,7 @@ import { IdeaQueueScreen } from '../screens/manager/IdeaQueueScreen';
 import { ManagerIdeaDetailScreen } from '../screens/manager/ManagerIdeaDetailScreen';
 import { ProjectListScreen } from '../screens/manager/ProjectListScreen';
 import { ProjectDetailScreen } from '../screens/manager/ProjectDetailScreen';
-import { PlaceholderLeadershipScreen } from '../screens/leadership/PlaceholderLeadershipScreen';
+import { DashboardScreen } from '../screens/leadership/DashboardScreen';
 
 const AuthStack = createNativeStackNavigator();
 const OperatorStack = createNativeStackNavigator();
@@ -105,8 +105,8 @@ function LeadershipNavigator() {
   return (
     <LeadershipStack.Navigator>
       <LeadershipStack.Screen
-        name="LeadershipHome"
-        component={PlaceholderLeadershipScreen}
+        name="Dashboard"
+        component={DashboardScreen}
         options={{ title: 'Dashboard' }}
       />
     </LeadershipStack.Navigator>
