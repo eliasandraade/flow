@@ -498,8 +498,74 @@ O campo *Evidência final* é preenchido no fechamento de cada fase.
 
 ---
 
-## 6. Histórico de atualização
+## 6. Evidências da Fase 1 — migração para MongoDB
+
+Executado em 09/09/2026 contra MongoDB 8.0.30 em replica set `rs0` de nó único.
+
+### 6.1 Resultado dos testes
+
+```text
+Flow.Domain.Tests          124 testes  0 falhas
+Flow.Application.Tests      10 testes  0 falhas
+Flow.Integration.Tests      54 testes  0 falhas   (MongoDB real)
+--------------------------------------------------
+Total                      188 testes  0 falhas
+dotnet build Flow.sln       0 erros    0 avisos
+```
+
+O baseline tinha 121 testes contra EF InMemory. Os 54 testes de integração agora rodam
+contra um MongoDB real e descartável, com transações reais.
+
+### 6.2 Requisitos que passam a `VERIFIED`
+
+| ID | Evidência |
+|---|---|
+| DB-01 | Nenhuma referência a EF Core em `src/`. `ApplicationDbContext`, configurations e migrations removidos. |
+| DB-02 | `MongoDB.Driver` 3.11.1, `MongoClient` singleton em `Flow.Infrastructure/DependencyInjection.cs`. |
+| DB-03 | `docs/sprint-2/data-model.md` escrito antes do código, a partir dos access patterns. |
+| DB-04 | `MongoIndexInitializer` cria 31 índices de forma idempotente no startup. |
+| DB-05 | `TransactionalIntegrityTests` exercita transação multi-documento real. |
+| DB-06 | `IUnitOfWork.ExecuteAsync` na Application; `IClientSessionHandle` não aparece em nenhuma assinatura da camada. |
+| DB-07 | `IAuditLogRepository` e `IProjectSnapshotRepository` só expõem append e leitura. |
+| AUTH-01..05 | `AuthTests` cobre registro, login, papéis, 401 e a matriz 403 por perfil. |
+| AUTH-06 | `Refresh_ReusingARotatedToken_IsRejectedAndKillsTheChain` e `RefreshTokens_AreStoredOnlyAsHashes`. |
+| AUTH-07 | `DemoDataSeeder` idempotente sob `SEED_DEMO_DATA`; segunda execução não duplica. |
+| AUTH-08 | `MongoUserStore` e `MongoRoleStore` sobre os contratos oficiais do Identity, sem pacote comunitário. |
+| STR-01..09 | `GuidelinesController` com CRUD, `current`, histórico e filtros; `StrategicGuidelineTests` cobre a vigência derivada. |
+| IDEA-01..10 | `InnovationPipelineTests` cobre draft, edição, exclusão, submissão, score, FlowScore, comparação e autorização por recurso. |
+| PRJ-01..07 | `ProjectAndResultTests` cobre a máquina de estados, stage, progresso, risco e snapshots. |
+| RES-01..06 | Estimated e Actual independentes, ROI, produtividade, horas e qualidade, com precisão `Decimal128` verificada. |
+| DASH-01..06 | `DashboardTests` cobre base vazia e base realista; `DashboardCompositionTests` cobre a aritmética de borda. |
+| SEC-01, SEC-02 | ProblemDetails com `traceId`; `ValidationBehavior` ativo devolvendo 422. |
+| SEC-03 | Autorização por recurso verificada em `Idea_OfAnotherOperator_IsNotReadable`. |
+| SEC-08 | Rotação, revogação e hash do refresh token verificados. |
+| OBS-04 | `/health/live` e `/health/ready` respondendo, com o Mongo como dependência de readiness. |
+
+### 6.3 Defeitos encontrados e corrigidos durante a fase
+
+Registrados porque são exatamente o tipo de regressão que uma migração introduz em silêncio.
+
+| # | Defeito | Como apareceu | Correção |
+|---|---|---|---|
+| D1 | `MapIdMember` falhava para entidades que herdam `Id` de `BaseEntity`. | API não subia. | Registrar o class map de `BaseEntity`; a convenção do driver resolve o id por herança. |
+| D2 | `UserManager` normaliza o nome do papel antes de chegar ao store, então `LEADERSHIP` era persistido. `ClaimsPrincipal.IsInRole` compara valor com ordinal sensível a caso, e **todo** `[Authorize(Roles = ...)]` devolvia 403. | Login funcionava, mas `GET /dashboard/summary` devolvia 403 para Leadership. | O store resolve o nome normalizado para o nome canônico do papel antes de gravar. |
+| D3 | `["completed"] = 0` em projeção de inclusão era interpretado como exclusão pelo MongoDB. | `GET /dashboard/summary` devolvia 500. | Envolver em `$literal`. |
+| D4 | O seeder só retrodatava `createdAt`, então tempo médio de conclusão e dias bloqueado ficavam em zero. | Dashboard com KPI zerado apesar de dados populados. | Retrodatar também `startDate`, `completedAt`, `blockedSince` e distribuir auditoria e snapshots ao longo do período. |
+| D5 | Nome de banco de teste com 75 caracteres excedia o limite de 63 do MongoDB. | Toda a suíte de integração falhava na criação de índices. | Encurtar os identificadores gerados. |
+
+### 6.4 Mudanças de contrato HTTP
+
+| Situação | Antes | Agora | Motivo |
+|---|---|---|---|
+| Falha de validação | 400 | **422** | Distinguir entrada malformada de conflito de estado, como o brief pede para o tratamento no mobile. |
+| `DomainException` | 400 | **409** | Depois da validação de entrada, o que resta são transições inválidas, que são conflito de estado. |
+| Erros | sem `traceId` | `traceId` no ProblemDetails | Liga o erro reportado ao log, ao trace e ao `correlationId` da auditoria. |
+
+---
+
+## 7. Histórico de atualização
 
 | Data | Fase | Alteração |
 |---|---|---|
 | 09/09/2026 | Fase 0 | Auditoria inicial, baseline, pesquisa de versões e criação da matriz. |
+| 09/09/2026 | Fase 1 | Migração integral para MongoDB, Identity sobre Mongo, expansão de domínio, dashboard agregado, seeds de demonstração e suíte de 188 testes. |

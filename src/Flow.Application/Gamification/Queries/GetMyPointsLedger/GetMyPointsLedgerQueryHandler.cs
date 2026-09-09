@@ -1,18 +1,19 @@
 using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Gamification.Queries.GetMyPointsLedger;
 
 public class GetMyPointsLedgerQueryHandler
     : IRequestHandler<GetMyPointsLedgerQuery, IReadOnlyList<PointsLedgerEntryDto>>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IPointLedgerRepository _ledger;
     private readonly ICurrentUserService _currentUser;
 
-    public GetMyPointsLedgerQueryHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public GetMyPointsLedgerQueryHandler(
+        IPointLedgerRepository ledger, ICurrentUserService currentUser)
     {
-        _context = context;
+        _ledger = ledger;
         _currentUser = currentUser;
     }
 
@@ -22,11 +23,7 @@ public class GetMyPointsLedgerQueryHandler
         var userId = _currentUser.UserId
             ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
 
-        var entries = await _context.PointLedgerEntries
-            .Where(e => e.UserId == userId)
-            .OrderByDescending(e => e.AwardedAt)
-            .Select(e => new { e.Id, e.Points, e.Reason, e.ReferenceType, e.ReferenceId, e.AwardedAt })
-            .ToListAsync(cancellationToken);
+        var entries = await _ledger.GetForUserAsync(userId, cancellationToken);
 
         return entries
             .Select(e => new PointsLedgerEntryDto(

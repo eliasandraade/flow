@@ -1,28 +1,20 @@
-using Flow.Application.Auth;
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
 using Flow.Domain.Entities;
 using Flow.Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Identity;
-using DomainRefreshToken = Flow.Domain.Entities.RefreshToken;
 
 namespace Flow.Application.Auth.Commands.Register;
 
 public class RegisterCommandHandler : IRequestHandler<RegisterCommand, AuthResultDto>
 {
     private readonly UserManager<User> _userManager;
-    private readonly IJwtTokenService _jwtTokenService;
-    private readonly IApplicationDbContext _context;
+    private readonly AuthTokenIssuer _tokenIssuer;
 
-    public RegisterCommandHandler(
-        UserManager<User> userManager,
-        IJwtTokenService jwtTokenService,
-        IApplicationDbContext context)
+    public RegisterCommandHandler(UserManager<User> userManager, AuthTokenIssuer tokenIssuer)
     {
         _userManager = userManager;
-        _jwtTokenService = jwtTokenService;
-        _context = context;
+        _tokenIssuer = tokenIssuer;
     }
 
     public async Task<AuthResultDto> Handle(RegisterCommand request, CancellationToken cancellationToken)
@@ -31,6 +23,8 @@ public class RegisterCommandHandler : IRequestHandler<RegisterCommand, AuthResul
         if (existing is not null)
             throw new ConflictException($"A user with email '{request.Email}' already exists.");
 
+        // Public registration always creates an Operator. Elevated roles are granted by a
+        // controlled administrative path, never by self-service.
         var user = User.Create(request.Name, request.Email, UserRole.Operator);
         var result = await _userManager.CreateAsync(user, request.Password);
 
@@ -43,20 +37,7 @@ public class RegisterCommandHandler : IRequestHandler<RegisterCommand, AuthResul
         await _userManager.AddToRoleAsync(user, UserRole.Operator.ToString());
 
         var roles = await _userManager.GetRolesAsync(user);
-        var accessToken = _jwtTokenService.GenerateAccessToken(user, roles);
-        var refreshTokenValue = _jwtTokenService.GenerateRefreshToken();
-        var refreshToken = DomainRefreshToken.Create(user.Id, refreshTokenValue, DateTimeOffset.UtcNow.AddDays(7));
-
-        _context.RefreshTokens.Add(refreshToken);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return new AuthResultDto(
-            AccessToken: accessToken,
-            RefreshToken: refreshTokenValue,
-            UserId: user.Id,
-            Name: user.Name,
-            Email: user.Email!,
-            Role: user.Role.ToString()
-        );
+        var (authResult, _) = await _tokenIssuer.IssueAsync(user, roles, cancellationToken);
+        return authResult;
     }
 }

@@ -7,12 +7,13 @@ public class IdeaComment
     public Guid Id { get; private set; }
     public Guid IdeaId { get; private set; }
     public Guid AuthorId { get; private set; }
+    public string AuthorName { get; private set; } = string.Empty;
     public string Body { get; private set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; private set; }
 
     private IdeaComment() { }
 
-    public static IdeaComment Create(Guid ideaId, Guid authorId, string body)
+    public static IdeaComment Create(Guid ideaId, Guid authorId, string authorName, string body)
     {
         if (ideaId == Guid.Empty) throw new DomainException("IdeaComment must reference a valid idea.");
         if (authorId == Guid.Empty) throw new DomainException("IdeaComment must reference a valid author.");
@@ -23,7 +24,8 @@ public class IdeaComment
             Id = Guid.NewGuid(),
             IdeaId = ideaId,
             AuthorId = authorId,
-            Body = body,
+            AuthorName = authorName,
+            Body = body.Trim(),
             CreatedAt = DateTimeOffset.UtcNow
         };
     }

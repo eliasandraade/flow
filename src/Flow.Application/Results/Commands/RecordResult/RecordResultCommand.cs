@@ -11,4 +11,7 @@ public record RecordResultCommand(
     decimal? ActualSavings,
     decimal? ActualCost,
     int? PaybackPeriodMonths,
+    decimal? ProductivityGainPercent,
+    decimal? TimeSavedHours,
+    decimal? QualityGainPercent,
     string? Notes) : IRequest<ResultDto>;

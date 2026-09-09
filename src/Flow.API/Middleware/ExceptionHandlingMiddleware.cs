@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using Flow.Application.Common.Exceptions;
@@ -5,6 +6,13 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Flow.API.Middleware;
 
+/// <summary>
+/// Turns application and domain exceptions into RFC7807 ProblemDetails.
+///
+/// Every response carries the trace id, which is the same value stored on the audit entry
+/// for the request, so a user-reported error can be tied to logs, traces and governance
+/// history from a single string.
+/// </summary>
 public class ExceptionHandlingMiddleware
 {
     private static readonly JsonSerializerOptions JsonOptions =
@@ -41,8 +49,8 @@ public class ExceptionHandlingMiddleware
 
         var (statusCode, title, errors) = exception switch
         {
-            Application.Common.Exceptions.ValidationException ve =>
-                (HttpStatusCode.BadRequest, "Validation failed", (object?)ve.Errors),
+            ValidationException ve =>
+                (HttpStatusCode.UnprocessableEntity, "Validation failed", (object?)ve.Errors),
             NotFoundException nfe =>
                 (HttpStatusCode.NotFound, nfe.Message, (object?)null),
             ConflictException ce =>
@@ -50,7 +58,9 @@ public class ExceptionHandlingMiddleware
             ForbiddenException fe =>
                 (HttpStatusCode.Forbidden, fe.Message, (object?)null),
             Flow.Domain.Exceptions.DomainException de =>
-                (HttpStatusCode.BadRequest, de.Message, (object?)null),
+                (HttpStatusCode.Conflict, de.Message, (object?)null),
+            OperationCanceledException =>
+                ((HttpStatusCode)499, "The request was cancelled.", (object?)null),
             _ =>
                 (HttpStatusCode.InternalServerError, "An unexpected error occurred.", (object?)null)
         };
@@ -62,10 +72,15 @@ public class ExceptionHandlingMiddleware
         {
             Title = title,
             Status = (int)statusCode,
+            Type = $"https://httpstatuses.io/{(int)statusCode}",
+            Instance = context.Request.Path
         };
 
         if (errors is not null)
             problem.Extensions["errors"] = errors;
+
+        var traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
+        problem.Extensions["traceId"] = traceId;
 
         context.Response.ContentType = "application/problem+json";
         context.Response.StatusCode = (int)statusCode;

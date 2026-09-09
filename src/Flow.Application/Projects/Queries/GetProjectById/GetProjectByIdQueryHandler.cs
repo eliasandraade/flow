@@ -1,28 +1,39 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Projects.Queries.GetProjectById;
 
 public class GetProjectByIdQueryHandler : IRequestHandler<GetProjectByIdQuery, ProjectDetailDto>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IProjectRepository _projects;
+    private readonly IIdeaRepository _ideas;
+    private readonly IGuidelineRepository _guidelines;
 
-    public GetProjectByIdQueryHandler(IApplicationDbContext context) => _context = context;
-
-    public async Task<ProjectDetailDto> Handle(GetProjectByIdQuery request, CancellationToken cancellationToken)
+    public GetProjectByIdQueryHandler(
+        IProjectRepository projects,
+        IIdeaRepository ideas,
+        IGuidelineRepository guidelines)
     {
-        var p = await _context.Projects
-            .FirstOrDefaultAsync(x => x.Id == request.ProjectId, cancellationToken)
+        _projects = projects;
+        _ideas = ideas;
+        _guidelines = guidelines;
+    }
+
+    public async Task<ProjectDetailDto> Handle(
+        GetProjectByIdQuery request, CancellationToken cancellationToken)
+    {
+        var project = await _projects.GetByIdAsync(request.ProjectId, cancellationToken)
             ?? throw new NotFoundException("Project", request.ProjectId);
 
-        return new ProjectDetailDto(
-            p.Id, p.Title, p.Description,
-            p.Status.ToString(), p.Priority.ToString(),
-            p.OwnerId, p.SourceIdeaId,
-            p.EstimatedCost, p.ActualCost,
-            p.StartDate, p.Deadline, p.CompletedAt,
-            p.BlockedReason, p.CreatedAt, p.UpdatedAt);
+        string? sourceIdeaTitle = null;
+        if (project.SourceIdeaId is { } ideaId)
+            sourceIdeaTitle = (await _ideas.GetByIdAsync(ideaId, cancellationToken))?.Title;
+
+        string? guidelineTitle = null;
+        if (project.LinkedGuidelineId is { } guidelineId)
+            guidelineTitle = (await _guidelines.GetByIdAsync(guidelineId, cancellationToken))?.Title;
+
+        return ProjectDetailDto.From(project, sourceIdeaTitle, guidelineTitle, DateTimeOffset.UtcNow);
     }
 }

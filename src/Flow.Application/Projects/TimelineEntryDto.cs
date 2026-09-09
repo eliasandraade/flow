@@ -1,3 +1,5 @@
+using Flow.Domain.Entities;
+
 namespace Flow.Application.Projects;
 
 public record TimelineEntryDto(
@@ -7,4 +9,8 @@ public record TimelineEntryDto(
     string? OldValue,
     string? NewValue,
     string? Reason,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp)
+{
+    public static TimelineEntryDto From(AuditLog a) =>
+        new(a.Action, a.ActorId, a.ActorName, a.OldValue, a.NewValue, a.Reason, a.Timestamp);
+}

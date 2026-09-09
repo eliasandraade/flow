@@ -1,9 +1,12 @@
-using System.ComponentModel.DataAnnotations;
-using Flow.Application.Guidelines;
+using Flow.Domain.Enums;
 using MediatR;
 
 namespace Flow.Application.Guidelines.Commands.CreateGuideline;
 
 public record CreateGuidelineCommand(
-    [Required] string Title,
-    [Required] string Description) : IRequest<GuidelineDto>;
+    string Title,
+    string Description,
+    GuidelineCategory Category,
+    string? Campaign,
+    DateTimeOffset ValidFrom,
+    DateTimeOffset? ValidUntil) : IRequest<GuidelineDto>;

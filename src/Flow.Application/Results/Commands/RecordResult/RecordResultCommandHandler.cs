@@ -1,84 +1,114 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
+using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
+using Flow.Domain.Enums;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Results.Commands.RecordResult;
 
 public class RecordResultCommandHandler : IRequestHandler<RecordResultCommand, ResultDto>
 {
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IProjectRepository _projects;
+    private readonly IResultRepository _results;
+    private readonly IUserRepository _users;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly AuditTrail _audit;
+    private readonly NotificationPublisher _notifications;
 
-    public RecordResultCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public RecordResultCommandHandler(
+        IProjectRepository projects,
+        IResultRepository results,
+        IUserRepository users,
+        IUnitOfWork unitOfWork,
+        AuditTrail audit,
+        NotificationPublisher notifications)
     {
-        _context = context;
-        _currentUser = currentUser;
+        _projects = projects;
+        _results = results;
+        _users = users;
+        _unitOfWork = unitOfWork;
+        _audit = audit;
+        _notifications = notifications;
     }
 
     public async Task<ResultDto> Handle(RecordResultCommand request, CancellationToken cancellationToken)
     {
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
-        var actorName = _currentUser.UserName ?? "Unknown";
+        var actorId = _audit.ActorId;
 
-        _ = await _context.Projects
-            .FirstOrDefaultAsync(p => p.Id == request.ProjectId, cancellationToken)
+        var project = await _projects.GetByIdAsync(request.ProjectId, cancellationToken)
             ?? throw new NotFoundException("Project", request.ProjectId);
 
-        var result = await _context.Results
-            .FirstOrDefaultAsync(r => r.ProjectId == request.ProjectId, cancellationToken);
+        var result = await _results.GetByProjectIdAsync(request.ProjectId, cancellationToken);
 
-        bool hasEstimated = request.EstimatedRevenue.HasValue
+        var hasEstimated = request.EstimatedRevenue.HasValue
             || request.EstimatedSavings.HasValue
             || request.EstimatedCost.HasValue;
 
-        bool hasActual = request.ActualRevenue.HasValue
+        var hasActual = request.ActualRevenue.HasValue
             || request.ActualSavings.HasValue
             || request.ActualCost.HasValue;
 
-        bool hasNotes = request.PaybackPeriodMonths.HasValue || request.Notes is not null;
+        var hasImpact = request.ProductivityGainPercent.HasValue
+            || request.TimeSavedHours.HasValue
+            || request.QualityGainPercent.HasValue;
 
-        bool mutated = hasEstimated || hasActual || hasNotes;
+        var hasNotes = request.PaybackPeriodMonths.HasValue || request.Notes is not null;
 
-        if (!mutated && result is not null)
-            return ToDto(result); // existing result, nothing to change — skip save and audit
+        if (!hasEstimated && !hasActual && !hasImpact && !hasNotes)
+        {
+            if (result is not null) return ResultDto.From(result);
 
-        if (!mutated && result is null)
             throw new ValidationException(new Dictionary<string, string[]>
             {
                 ["fields"] = ["At least one field must be provided to record a result."]
             });
-
-        // New result — only create if something will actually be set
-        if (result is null)
-        {
-            result = Result.Create(request.ProjectId, actorId);
-            _context.Results.Add(result);
         }
 
+        result ??= Result.Create(request.ProjectId, actorId);
+
+        // Estimated and actual are written through separate operations so a planning figure
+        // can never be silently promoted into a realised one.
         if (hasEstimated)
             result.SetEstimated(request.EstimatedRevenue, request.EstimatedSavings, request.EstimatedCost);
 
         if (hasActual)
             result.SetActual(request.ActualRevenue, request.ActualSavings, request.ActualCost);
 
+        if (hasImpact)
+            result.SetImpactMetrics(
+                request.ProductivityGainPercent, request.TimeSavedHours, request.QualityGainPercent);
+
         if (hasNotes)
             result.SetNotes(request.PaybackPeriodMonths, request.Notes);
 
-        var audit = AuditLog.Create(
-            "Project", request.ProjectId, "ResultRecorded", actorId, actorName);
+        var leadership = hasActual
+            ? await _users.GetByRoleAsync(UserRole.Leadership, cancellationToken)
+            : [];
 
-        await _context.SaveChangesWithAuditAsync(new[] { audit }, cancellationToken);
+        await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            await _results.UpsertAsync(result, ct);
 
-        return ToDto(result);
+            await _audit.RecordAsync(
+                nameof(Project), project.Id, "ResultRecorded",
+                newValue: hasActual ? "Actual" : "Estimated", cancellationToken: ct);
+
+            // Only a realised result is worth interrupting leadership for; an estimate is
+            // planning noise at that level.
+            if (hasActual)
+            {
+                await _notifications.PublishManyAsync(
+                    leadership.Select(l => l.Id),
+                    NotificationType.ResultRecorded,
+                    "Resultado realizado registrado",
+                    $"\"{project.Title}\" teve resultados reais registrados.",
+                    $"flow://projects/{project.Id}/result",
+                    leaderId => $"ResultRecorded:{project.Id}:{result.UpdatedAt.Ticks}:{leaderId}",
+                    ct);
+            }
+        }, cancellationToken);
+
+        return ResultDto.From(result);
     }
-
-    private static ResultDto ToDto(Result r) => new(
-        r.Id, r.ProjectId,
-        r.EstimatedRevenue, r.EstimatedSavings, r.EstimatedCost, r.EstimatedROI, r.EstimatedRecordedAt,
-        r.ActualRevenue, r.ActualSavings, r.ActualCost, r.ActualROI, r.ActualRecordedAt,
-        r.PaybackPeriodMonths, r.Notes,
-        r.RecordedBy, r.CreatedAt, r.UpdatedAt);
 }

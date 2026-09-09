@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using Flow.Domain.Enums;
 using MediatR;
 
@@ -6,8 +5,8 @@ namespace Flow.Application.Projects.Commands.UpdateProject;
 
 public record UpdateProjectCommand(
     Guid ProjectId,
-    [Required] string Title,
-    [Required] string Description,
+    string Title,
+    string Description,
     ProjectPriority Priority,
     Guid OwnerId,
     decimal? EstimatedCost,

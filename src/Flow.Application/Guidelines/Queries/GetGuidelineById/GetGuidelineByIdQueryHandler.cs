@@ -1,26 +1,21 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
-using Flow.Application.Guidelines;
+using Flow.Application.Common.Persistence;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Guidelines.Queries.GetGuidelineById;
 
 public class GetGuidelineByIdQueryHandler : IRequestHandler<GetGuidelineByIdQuery, GuidelineDto>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IGuidelineRepository _guidelines;
 
-    public GetGuidelineByIdQueryHandler(IApplicationDbContext context) => _context = context;
+    public GetGuidelineByIdQueryHandler(IGuidelineRepository guidelines) => _guidelines = guidelines;
 
     public async Task<GuidelineDto> Handle(
         GetGuidelineByIdQuery request, CancellationToken cancellationToken)
     {
-        var guideline = await _context.StrategicGuidelines
-            .FirstOrDefaultAsync(g => g.Id == request.Id, cancellationToken)
+        var guideline = await _guidelines.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException("Guideline", request.Id);
 
-        return new GuidelineDto(
-            guideline.Id, guideline.Title, guideline.Description,
-            guideline.CreatedBy, guideline.CreatedAt, guideline.UpdatedAt);
+        return GuidelineDto.From(guideline, DateTimeOffset.UtcNow);
     }
 }

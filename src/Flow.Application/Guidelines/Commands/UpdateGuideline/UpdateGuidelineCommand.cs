@@ -1,9 +1,13 @@
-using System.ComponentModel.DataAnnotations;
+using Flow.Domain.Enums;
 using MediatR;
 
 namespace Flow.Application.Guidelines.Commands.UpdateGuideline;
 
 public record UpdateGuidelineCommand(
     Guid Id,
-    [Required] string Title,
-    [Required] string Description) : IRequest;
+    string Title,
+    string Description,
+    GuidelineCategory Category,
+    string? Campaign,
+    DateTimeOffset ValidFrom,
+    DateTimeOffset? ValidUntil) : IRequest;

@@ -1,50 +1,52 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
-using Flow.Domain.Entities;
+using Flow.Application.Common.Persistence;
+using Flow.Application.Common.Services;
+using Flow.Domain.Enums;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Projects.Commands.UnblockProject;
 
 public class UnblockProjectCommandHandler : IRequestHandler<UnblockProjectCommand>
 {
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IProjectRepository _projects;
+    private readonly ProjectTransitionRecorder _recorder;
+    private readonly NotificationPublisher _notifications;
 
-    public UnblockProjectCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public UnblockProjectCommandHandler(
+        IProjectRepository projects,
+        ProjectTransitionRecorder recorder,
+        NotificationPublisher notifications)
     {
-        _context = context;
-        _currentUser = currentUser;
+        _projects = projects;
+        _recorder = recorder;
+        _notifications = notifications;
     }
 
     public async Task Handle(UnblockProjectCommand request, CancellationToken cancellationToken)
     {
-        var project = await _context.Projects
-            .FirstOrDefaultAsync(p => p.Id == request.ProjectId, cancellationToken)
+        var project = await _projects.GetByIdAsync(request.ProjectId, cancellationToken)
             ?? throw new NotFoundException("Project", request.ProjectId);
 
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
-
-        var owner = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == project.OwnerId, cancellationToken)
-            ?? throw new NotFoundException("User", project.OwnerId);
-
-        var oldStatus = project.Status.ToString();
+        var previous = project.Status.ToString();
+        var blockedSince = project.BlockedSince;
         project.Unblock();
 
-        var snapshot = ProjectSnapshot.Create(project, owner.Name, "Unblocked", actorId);
-        _context.ProjectSnapshots.Add(snapshot);
+        var daysBlocked = blockedSince is null
+            ? (int?)null
+            : (int)(DateTimeOffset.UtcNow - blockedSince.Value).TotalDays;
 
-        var audit = AuditLog.Create(
-            entityType: "Project",
-            entityId: project.Id,
-            action: "Unblocked",
-            actorId: actorId,
-            actorName: _currentUser.UserName ?? string.Empty,
-            oldValue: oldStatus,
-            newValue: project.Status.ToString());
-
-        await _context.SaveChangesWithAuditAsync(new[] { audit }, cancellationToken);
+        await _recorder.RecordAsync(
+            project, "Unblocked",
+            previousValue: previous,
+            reason: daysBlocked is null ? null : $"Blocked for {daysBlocked} day(s)",
+            alsoInTransaction: ct => _notifications.PublishAsync(
+                project.OwnerId,
+                NotificationType.ProjectUnblocked,
+                "Projeto desbloqueado",
+                $"\"{project.Title}\" voltou a andar.",
+                $"flow://projects/{project.Id}",
+                $"ProjectUnblocked:{project.Id}:{DateTimeOffset.UtcNow.Ticks}",
+                ct),
+            cancellationToken: cancellationToken);
     }
 }

@@ -1,51 +1,47 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
-using Flow.Domain.Entities;
+using Flow.Application.Common.Persistence;
+using Flow.Application.Common.Services;
+using Flow.Domain.Enums;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Projects.Commands.CancelProject;
 
 public class CancelProjectCommandHandler : IRequestHandler<CancelProjectCommand>
 {
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IProjectRepository _projects;
+    private readonly ProjectTransitionRecorder _recorder;
+    private readonly NotificationPublisher _notifications;
 
-    public CancelProjectCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public CancelProjectCommandHandler(
+        IProjectRepository projects,
+        ProjectTransitionRecorder recorder,
+        NotificationPublisher notifications)
     {
-        _context = context;
-        _currentUser = currentUser;
+        _projects = projects;
+        _recorder = recorder;
+        _notifications = notifications;
     }
 
     public async Task Handle(CancelProjectCommand request, CancellationToken cancellationToken)
     {
-        var project = await _context.Projects
-            .FirstOrDefaultAsync(p => p.Id == request.ProjectId, cancellationToken)
+        var project = await _projects.GetByIdAsync(request.ProjectId, cancellationToken)
             ?? throw new NotFoundException("Project", request.ProjectId);
 
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
-
-        var owner = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == project.OwnerId, cancellationToken)
-            ?? throw new NotFoundException("User", project.OwnerId);
-
-        var oldStatus = project.Status.ToString();
+        var previous = project.Status.ToString();
         project.Cancel(request.Reason);
 
-        var snapshot = ProjectSnapshot.Create(project, owner.Name, "Cancelled", actorId);
-        _context.ProjectSnapshots.Add(snapshot);
-
-        var audit = AuditLog.Create(
-            entityType: "Project",
-            entityId: project.Id,
-            action: "Cancelled",
-            actorId: actorId,
-            actorName: _currentUser.UserName ?? string.Empty,
-            oldValue: oldStatus,
-            newValue: project.Status.ToString(),
-            reason: request.Reason);
-
-        await _context.SaveChangesWithAuditAsync(new[] { audit }, cancellationToken);
+        await _recorder.RecordAsync(
+            project, "Cancelled",
+            previousValue: previous,
+            reason: request.Reason,
+            alsoInTransaction: ct => _notifications.PublishAsync(
+                project.OwnerId,
+                NotificationType.ProjectCancelled,
+                "Projeto cancelado",
+                $"\"{project.Title}\": {request.Reason}",
+                $"flow://projects/{project.Id}",
+                $"ProjectCancelled:{project.Id}:{project.OwnerId}",
+                ct),
+            cancellationToken: cancellationToken);
     }
 }

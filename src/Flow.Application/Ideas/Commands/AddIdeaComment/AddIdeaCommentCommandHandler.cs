@@ -1,45 +1,64 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
+using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
+using Flow.Domain.Enums;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Ideas.Commands.AddIdeaComment;
 
 public class AddIdeaCommentCommandHandler : IRequestHandler<AddIdeaCommentCommand, IdeaCommentDto>
 {
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IIdeaRepository _ideas;
+    private readonly IIdeaCommentRepository _comments;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly AuditTrail _audit;
+    private readonly NotificationPublisher _notifications;
 
-    public AddIdeaCommentCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public AddIdeaCommentCommandHandler(
+        IIdeaRepository ideas,
+        IIdeaCommentRepository comments,
+        IUnitOfWork unitOfWork,
+        AuditTrail audit,
+        NotificationPublisher notifications)
     {
-        _context = context;
-        _currentUser = currentUser;
+        _ideas = ideas;
+        _comments = comments;
+        _unitOfWork = unitOfWork;
+        _audit = audit;
+        _notifications = notifications;
     }
 
-    public async Task<IdeaCommentDto> Handle(AddIdeaCommentCommand request, CancellationToken cancellationToken)
+    public async Task<IdeaCommentDto> Handle(
+        AddIdeaCommentCommand request, CancellationToken cancellationToken)
     {
-        var ideaExists = await _context.Ideas
-            .AnyAsync(i => i.Id == request.IdeaId, cancellationToken);
-        if (!ideaExists)
-            throw new NotFoundException("Idea", request.IdeaId);
+        var idea = await _ideas.GetByIdAsync(request.IdeaId, cancellationToken)
+            ?? throw new NotFoundException("Idea", request.IdeaId);
 
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
+        var comment = IdeaComment.Create(
+            idea.Id, _audit.ActorId, _audit.ActorName, request.Body);
 
-        var comment = IdeaComment.Create(request.IdeaId, actorId, request.Body);
-        _context.IdeaComments.Add(comment);
+        await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            await _comments.AddAsync(comment, ct);
 
-        var auditLog = AuditLog.Create(
-            entityType: nameof(Idea),
-            entityId: request.IdeaId,
-            action: "CommentAdded",
-            actorId: actorId,
-            actorName: _currentUser.UserName ?? string.Empty,
-            newValue: comment.Id.ToString());
+            await _audit.RecordAsync(
+                nameof(Idea), idea.Id, "Commented", newValue: comment.Id.ToString(), cancellationToken: ct);
 
-        await _context.SaveChangesWithAuditAsync(new[] { auditLog }, cancellationToken);
+            // Commenting on your own idea should not notify you about yourself.
+            if (idea.SubmittedBy != _audit.ActorId)
+            {
+                await _notifications.PublishAsync(
+                    idea.SubmittedBy,
+                    NotificationType.IdeaCommented,
+                    "Novo comentário na sua ideia",
+                    $"{_audit.ActorName} comentou em \"{idea.Title}\".",
+                    $"flow://ideas/{idea.Id}",
+                    $"IdeaCommented:{comment.Id}:{idea.SubmittedBy}",
+                    ct);
+            }
+        }, cancellationToken);
 
-        return new IdeaCommentDto(comment.Id, comment.AuthorId, comment.Body, comment.CreatedAt);
+        return IdeaCommentDto.From(comment);
     }
 }

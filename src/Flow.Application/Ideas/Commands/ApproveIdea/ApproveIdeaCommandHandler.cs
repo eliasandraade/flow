@@ -1,8 +1,9 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
+using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
+using Flow.Domain.Enums;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Ideas.Commands.ApproveIdea;
 
@@ -10,50 +11,66 @@ public class ApproveIdeaCommandHandler : IRequestHandler<ApproveIdeaCommand>
 {
     private const int IdeaApprovalPoints = 50;
 
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IIdeaRepository _ideas;
+    private readonly IUserRepository _users;
+    private readonly IPointLedgerRepository _pointLedger;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly AuditTrail _audit;
+    private readonly NotificationPublisher _notifications;
 
-    public ApproveIdeaCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public ApproveIdeaCommandHandler(
+        IIdeaRepository ideas,
+        IUserRepository users,
+        IPointLedgerRepository pointLedger,
+        IUnitOfWork unitOfWork,
+        AuditTrail audit,
+        NotificationPublisher notifications)
     {
-        _context = context;
-        _currentUser = currentUser;
+        _ideas = ideas;
+        _users = users;
+        _pointLedger = pointLedger;
+        _unitOfWork = unitOfWork;
+        _audit = audit;
+        _notifications = notifications;
     }
 
     public async Task Handle(ApproveIdeaCommand request, CancellationToken cancellationToken)
     {
-        var idea = await _context.Ideas
-            .FirstOrDefaultAsync(i => i.Id == request.IdeaId, cancellationToken)
+        var idea = await _ideas.GetByIdAsync(request.IdeaId, cancellationToken)
             ?? throw new NotFoundException("Idea", request.IdeaId);
 
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
-
-        var submitter = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == idea.SubmittedBy, cancellationToken)
+        var submitter = await _users.GetByIdAsync(idea.SubmittedBy, cancellationToken)
             ?? throw new NotFoundException("User", idea.SubmittedBy);
 
-        var oldStatus = idea.Status.ToString();
+        var previousStatus = idea.Status.ToString();
         idea.Approve(request.ManagerComment);
-        submitter.AddPoints(IdeaApprovalPoints);
 
         var ledgerEntry = PointLedgerEntry.Create(
             userId: submitter.Id,
             points: IdeaApprovalPoints,
             reason: "Idea approved",
-            referenceType: "Idea",
+            referenceType: nameof(Idea),
             referenceId: idea.Id);
-        _context.PointLedgerEntries.Add(ledgerEntry);
 
-        var auditLog = AuditLog.Create(
-            entityType: nameof(Idea),
-            entityId: idea.Id,
-            action: "Approved",
-            actorId: actorId,
-            actorName: _currentUser.UserName ?? string.Empty,
-            oldValue: oldStatus,
-            newValue: idea.Status.ToString(),
-            reason: request.ManagerComment);
+        await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            await _ideas.UpdateAsync(idea, ct);
+            await _users.IncrementPointsAsync(submitter.Id, IdeaApprovalPoints, ct);
+            await _pointLedger.AppendAsync(ledgerEntry, ct);
 
-        await _context.SaveChangesWithAuditAsync(new[] { auditLog }, cancellationToken);
+            await _audit.RecordAsync(
+                nameof(Idea), idea.Id, "Approved",
+                oldValue: previousStatus, newValue: idea.Status.ToString(),
+                reason: request.ManagerComment, cancellationToken: ct);
+
+            await _notifications.PublishAsync(
+                idea.SubmittedBy,
+                NotificationType.IdeaApproved,
+                "Sua ideia foi aprovada",
+                $"\"{idea.Title}\" foi aprovada. Você ganhou {IdeaApprovalPoints} pontos.",
+                $"flow://ideas/{idea.Id}",
+                $"IdeaApproved:{idea.Id}:{idea.SubmittedBy}",
+                ct);
+        }, cancellationToken);
     }
 }

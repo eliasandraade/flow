@@ -1,36 +1,51 @@
 using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
+using Flow.Domain.Enums;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Ideas.Queries.GetIdeas;
 
 public class GetIdeasQueryHandler : IRequestHandler<GetIdeasQuery, IReadOnlyList<IdeaSummaryDto>>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IIdeaRepository _ideas;
+    private readonly ICurrentUserService _currentUser;
 
-    public GetIdeasQueryHandler(IApplicationDbContext context) => _context = context;
+    public GetIdeasQueryHandler(IIdeaRepository ideas, ICurrentUserService currentUser)
+    {
+        _ideas = ideas;
+        _currentUser = currentUser;
+    }
 
     public async Task<IReadOnlyList<IdeaSummaryDto>> Handle(
         GetIdeasQuery request, CancellationToken cancellationToken)
     {
-        var query = _context.Ideas.AsQueryable();
-        if (request.SubmittedById.HasValue)
-            query = query.Where(i => i.SubmittedBy == request.SubmittedById.Value);
+        // An Operator only ever sees their own ideas, regardless of what the query asks for.
+        // Scoping here rather than in the controller keeps the rule with the data access.
+        var submittedBy = _currentUser.IsInRole(UserRole.Operator)
+            ? _currentUser.UserId
+            : request.SubmittedById;
 
-        var rows = await query
-            .OrderByDescending(i => i.CreatedAt)
-            .Select(i => new
-            {
-                i.Id, i.Title, i.Problem, i.Status, i.Priority,
-                i.SubmittedBy, i.LinkedGuidelineId, i.CreatedAt
-            })
-            .ToListAsync(cancellationToken);
+        var filter = new IdeaFilter
+        {
+            SubmittedBy = submittedBy,
+            Status = request.Status,
+            Priority = request.Priority,
+            LinkedGuidelineId = request.LinkedGuidelineId,
+            MinScore = request.MinScore,
+            SortBy = ParseSort(request.SortBy),
+            Skip = Math.Max(0, request.Skip),
+            Take = Math.Clamp(request.Take, 1, 200)
+        };
 
-        return rows
-            .Select(i => new IdeaSummaryDto(
-                i.Id, i.Title, i.Problem,
-                i.Status.ToString(), i.Priority.ToString(),
-                i.SubmittedBy, i.LinkedGuidelineId, i.CreatedAt))
-            .ToList();
+        var results = await _ideas.QueryAsync(filter, cancellationToken);
+        return results.Select(IdeaSummaryDto.From).ToList();
     }
+
+    private static IdeaSortOrder ParseSort(string? sortBy) => sortBy?.ToLowerInvariant() switch
+    {
+        "score" => IdeaSortOrder.ScoreDesc,
+        "flowscore" => IdeaSortOrder.FlowScoreDesc,
+        "priority" => IdeaSortOrder.PriorityDesc,
+        _ => IdeaSortOrder.CreatedAtDesc
+    };
 }

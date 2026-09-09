@@ -1,23 +1,27 @@
-using Flow.Application.Common.Interfaces;
-using Flow.Application.Guidelines;
+using Flow.Application.Common.Persistence;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Guidelines.Queries.GetGuidelines;
 
 public class GetGuidelinesQueryHandler : IRequestHandler<GetGuidelinesQuery, IReadOnlyList<GuidelineDto>>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IGuidelineRepository _guidelines;
 
-    public GetGuidelinesQueryHandler(IApplicationDbContext context) => _context = context;
+    public GetGuidelinesQueryHandler(IGuidelineRepository guidelines) => _guidelines = guidelines;
 
     public async Task<IReadOnlyList<GuidelineDto>> Handle(
         GetGuidelinesQuery request, CancellationToken cancellationToken)
     {
-        return await _context.StrategicGuidelines
-            .OrderBy(g => g.Title)
-            .Select(g => new GuidelineDto(
-                g.Id, g.Title, g.Description, g.CreatedBy, g.CreatedAt, g.UpdatedAt))
-            .ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+
+        var filter = new GuidelineFilter
+        {
+            Category = request.Category,
+            Campaign = request.Campaign,
+            CurrentAt = request.CurrentOnly ? now : null
+        };
+
+        var results = await _guidelines.QueryAsync(filter, cancellationToken);
+        return results.Select(g => GuidelineDto.From(g, now)).ToList();
     }
 }

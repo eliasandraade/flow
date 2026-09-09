@@ -1,32 +1,28 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Ideas.Queries.GetIdeaComments;
 
 public class GetIdeaCommentsQueryHandler
     : IRequestHandler<GetIdeaCommentsQuery, IReadOnlyList<IdeaCommentDto>>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IIdeaRepository _ideas;
+    private readonly IIdeaCommentRepository _comments;
 
-    public GetIdeaCommentsQueryHandler(IApplicationDbContext context) => _context = context;
+    public GetIdeaCommentsQueryHandler(IIdeaRepository ideas, IIdeaCommentRepository comments)
+    {
+        _ideas = ideas;
+        _comments = comments;
+    }
 
     public async Task<IReadOnlyList<IdeaCommentDto>> Handle(
         GetIdeaCommentsQuery request, CancellationToken cancellationToken)
     {
-        var ideaExists = await _context.Ideas
-            .AnyAsync(i => i.Id == request.IdeaId, cancellationToken);
-        if (!ideaExists)
-            throw new NotFoundException("Idea", request.IdeaId);
+        var idea = await _ideas.GetByIdAsync(request.IdeaId, cancellationToken)
+            ?? throw new NotFoundException("Idea", request.IdeaId);
 
-        var comments = await _context.IdeaComments
-            .Where(c => c.IdeaId == request.IdeaId)
-            .OrderBy(c => c.CreatedAt)
-            .ToListAsync(cancellationToken);
-
-        return comments
-            .Select(c => new IdeaCommentDto(c.Id, c.AuthorId, c.Body, c.CreatedAt))
-            .ToList();
+        var comments = await _comments.GetForIdeaAsync(idea.Id, cancellationToken);
+        return comments.Select(IdeaCommentDto.From).ToList();
     }
 }

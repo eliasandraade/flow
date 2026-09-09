@@ -1,31 +1,32 @@
 using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
+using DomainRefreshToken = Flow.Domain.Entities.RefreshToken;
 
 namespace Flow.Application.Auth.Commands.Logout;
 
 public class LogoutCommandHandler : IRequestHandler<LogoutCommand>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IRefreshTokenRepository _refreshTokens;
     private readonly ICurrentUserService _currentUser;
 
-    public LogoutCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public LogoutCommandHandler(IRefreshTokenRepository refreshTokens, ICurrentUserService currentUser)
     {
-        _context = context;
+        _refreshTokens = refreshTokens;
         _currentUser = currentUser;
     }
 
     public async Task Handle(LogoutCommand request, CancellationToken cancellationToken)
     {
-        var token = await _context.RefreshTokens
-            .FirstOrDefaultAsync(
-                rt => rt.Token == request.RefreshToken && rt.UserId == _currentUser.UserId,
-                cancellationToken);
+        var tokenHash = DomainRefreshToken.Hash(request.RefreshToken);
+        var token = await _refreshTokens.GetByHashAsync(tokenHash, cancellationToken);
 
-        if (token is not null && token.IsActive)
-        {
-            token.Revoke();
-            await _context.SaveChangesAsync(cancellationToken);
-        }
+        // Logging out with someone else's token must not revoke it, and a token that is
+        // already inactive needs no work.
+        if (token is null || token.UserId != _currentUser.UserId || !token.IsActive)
+            return;
+
+        token.Revoke();
+        await _refreshTokens.UpdateAsync(token, cancellationToken);
     }
 }

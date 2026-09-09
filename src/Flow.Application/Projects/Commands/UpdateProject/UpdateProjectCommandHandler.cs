@@ -1,42 +1,44 @@
 using Flow.Application.Common.Exceptions;
-using Flow.Application.Common.Interfaces;
-using Flow.Domain.Entities;
+using Flow.Application.Common.Persistence;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Projects.Commands.UpdateProject;
 
 public class UpdateProjectCommandHandler : IRequestHandler<UpdateProjectCommand>
 {
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IProjectRepository _projects;
+    private readonly IUserRepository _users;
+    private readonly ProjectTransitionRecorder _recorder;
 
-    public UpdateProjectCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public UpdateProjectCommandHandler(
+        IProjectRepository projects,
+        IUserRepository users,
+        ProjectTransitionRecorder recorder)
     {
-        _context = context;
-        _currentUser = currentUser;
+        _projects = projects;
+        _users = users;
+        _recorder = recorder;
     }
 
     public async Task Handle(UpdateProjectCommand request, CancellationToken cancellationToken)
     {
-        var project = await _context.Projects
-            .FirstOrDefaultAsync(p => p.Id == request.ProjectId, cancellationToken)
+        var project = await _projects.GetByIdAsync(request.ProjectId, cancellationToken)
             ?? throw new NotFoundException("Project", request.ProjectId);
 
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
+        var owner = await _users.GetByIdAsync(request.OwnerId, cancellationToken)
+            ?? throw new NotFoundException("User", request.OwnerId);
+
+        var previousTitle = project.Title;
 
         project.Update(
-            request.Title, request.Description, request.Priority, request.OwnerId,
+            request.Title, request.Description, request.Priority,
+            owner.Id, owner.Name,
             request.EstimatedCost, request.ActualCost, request.Deadline);
 
-        var audit = AuditLog.Create(
-            entityType: "Project",
-            entityId: project.Id,
-            action: "Updated",
-            actorId: actorId,
-            actorName: _currentUser.UserName ?? string.Empty);
-
-        await _context.SaveChangesWithAuditAsync(new[] { audit }, cancellationToken);
+        await _recorder.RecordAsync(
+            project, "Updated",
+            previousValue: previousTitle,
+            newValue: project.Title,
+            cancellationToken: cancellationToken);
     }
 }

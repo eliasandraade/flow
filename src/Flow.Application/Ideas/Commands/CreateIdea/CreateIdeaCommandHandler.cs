@@ -1,49 +1,62 @@
 using Flow.Application.Common.Exceptions;
 using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
+using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Flow.Application.Ideas.Commands.CreateIdea;
 
 public class CreateIdeaCommandHandler : IRequestHandler<CreateIdeaCommand, IdeaSummaryDto>
 {
-    private readonly IApplicationDbContext _context;
+    private readonly IIdeaRepository _ideas;
+    private readonly IGuidelineRepository _guidelines;
     private readonly ICurrentUserService _currentUser;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly AuditTrail _audit;
 
-    public CreateIdeaCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public CreateIdeaCommandHandler(
+        IIdeaRepository ideas,
+        IGuidelineRepository guidelines,
+        ICurrentUserService currentUser,
+        IUnitOfWork unitOfWork,
+        AuditTrail audit)
     {
-        _context = context;
+        _ideas = ideas;
+        _guidelines = guidelines;
         _currentUser = currentUser;
+        _unitOfWork = unitOfWork;
+        _audit = audit;
     }
 
     public async Task<IdeaSummaryDto> Handle(CreateIdeaCommand request, CancellationToken cancellationToken)
     {
-        if (request.LinkedGuidelineId.HasValue)
+        var actorId = _audit.ActorId;
+
+        // A dangling guideline reference would silently break the strategy-to-result chain
+        // the dashboard depends on, so the link is validated at the point of creation.
+        if (request.LinkedGuidelineId is { } guidelineId
+            && !await _guidelines.ExistsAsync(guidelineId, cancellationToken))
         {
-            var exists = await _context.StrategicGuidelines
-                .AnyAsync(g => g.Id == request.LinkedGuidelineId.Value, cancellationToken);
-            if (!exists)
-                throw new NotFoundException("StrategicGuideline", request.LinkedGuidelineId.Value);
+            throw new NotFoundException("Guideline", guidelineId);
         }
 
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
         var idea = Idea.Create(
-            request.Title, request.Description, request.Problem,
-            actorId, request.LinkedGuidelineId);
+            request.Title,
+            request.Description,
+            request.Problem,
+            actorId,
+            _currentUser.UserName ?? string.Empty,
+            request.LinkedGuidelineId);
 
-        _context.Ideas.Add(idea);
+        await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            await _ideas.AddAsync(idea, ct);
+            await _audit.RecordAsync(
+                nameof(Idea), idea.Id, "Created",
+                newValue: idea.Status.ToString(), cancellationToken: ct);
+        }, cancellationToken);
 
-        var audit = AuditLog.Create(
-            "Idea", idea.Id, "Created",
-            actorId, _currentUser.UserName ?? "Unknown");
-
-        await _context.SaveChangesWithAuditAsync(new[] { audit }, cancellationToken);
-
-        return new IdeaSummaryDto(
-            idea.Id, idea.Title, idea.Problem,
-            idea.Status.ToString(), idea.Priority.ToString(),
-            idea.SubmittedBy, idea.LinkedGuidelineId, idea.CreatedAt);
+        return IdeaSummaryDto.From(idea);
     }
 }

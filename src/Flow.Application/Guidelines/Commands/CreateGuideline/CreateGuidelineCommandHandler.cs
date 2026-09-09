@@ -1,32 +1,57 @@
-using Flow.Application.Common.Interfaces;
-using Flow.Application.Guidelines;
+using Flow.Application.Common.Persistence;
+using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
+using Flow.Domain.Enums;
 using MediatR;
 
 namespace Flow.Application.Guidelines.Commands.CreateGuideline;
 
 public class CreateGuidelineCommandHandler : IRequestHandler<CreateGuidelineCommand, GuidelineDto>
 {
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IGuidelineRepository _guidelines;
+    private readonly IGuidelineHistoryRepository _history;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly AuditTrail _audit;
 
-    public CreateGuidelineCommandHandler(IApplicationDbContext context, ICurrentUserService currentUser)
+    public CreateGuidelineCommandHandler(
+        IGuidelineRepository guidelines,
+        IGuidelineHistoryRepository history,
+        IUnitOfWork unitOfWork,
+        AuditTrail audit)
     {
-        _context = context;
-        _currentUser = currentUser;
+        _guidelines = guidelines;
+        _history = history;
+        _unitOfWork = unitOfWork;
+        _audit = audit;
     }
 
     public async Task<GuidelineDto> Handle(CreateGuidelineCommand request, CancellationToken cancellationToken)
     {
-        var actorId = _currentUser.UserId
-            ?? throw new InvalidOperationException("Authenticated user identity could not be resolved.");
-        var guideline = StrategicGuideline.Create(request.Title, request.Description, actorId);
+        var actorId = _audit.ActorId;
 
-        _context.StrategicGuidelines.Add(guideline);
-        await _context.SaveChangesAsync(cancellationToken);
+        var guideline = StrategicGuideline.Create(
+            request.Title,
+            request.Description,
+            request.Category,
+            request.Campaign,
+            request.ValidFrom,
+            request.ValidUntil,
+            actorId);
 
-        return new GuidelineDto(
-            guideline.Id, guideline.Title, guideline.Description,
-            guideline.CreatedBy, guideline.CreatedAt, guideline.UpdatedAt);
+        await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            await _guidelines.AddAsync(guideline, ct);
+
+            await _history.AppendAsync(
+                StrategicGuidelineHistoryEntry.Capture(
+                    guideline, GuidelineChangeType.Created, actorId, _audit.ActorName),
+                ct);
+
+            await _audit.RecordAsync(
+                nameof(StrategicGuideline), guideline.Id, "Created",
+                newValue: guideline.Title, cancellationToken: ct);
+        }, cancellationToken);
+
+        return GuidelineDto.From(guideline, DateTimeOffset.UtcNow);
     }
 }

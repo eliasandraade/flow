@@ -1,10 +1,10 @@
-using Flow.Application.Auth;
 using Flow.Application.Common.Exceptions;
 using Flow.Application.Common.Interfaces;
+using Flow.Application.Common.Persistence;
 using Flow.Domain.Entities;
 using MediatR;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using DomainRefreshToken = Flow.Domain.Entities.RefreshToken;
 
 namespace Flow.Application.Auth.Commands.RefreshToken;
@@ -13,16 +13,25 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
 {
     private readonly UserManager<User> _userManager;
     private readonly IJwtTokenService _jwtTokenService;
-    private readonly IApplicationDbContext _context;
+    private readonly IRefreshTokenRepository _refreshTokens;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly AuthTokenIssuer _tokenIssuer;
+    private readonly ILogger<RefreshTokenCommandHandler> _logger;
 
     public RefreshTokenCommandHandler(
         UserManager<User> userManager,
         IJwtTokenService jwtTokenService,
-        IApplicationDbContext context)
+        IRefreshTokenRepository refreshTokens,
+        IUnitOfWork unitOfWork,
+        AuthTokenIssuer tokenIssuer,
+        ILogger<RefreshTokenCommandHandler> logger)
     {
         _userManager = userManager;
         _jwtTokenService = jwtTokenService;
-        _context = context;
+        _refreshTokens = refreshTokens;
+        _unitOfWork = unitOfWork;
+        _tokenIssuer = tokenIssuer;
+        _logger = logger;
     }
 
     public async Task<AuthResultDto> Handle(RefreshTokenCommand request, CancellationToken cancellationToken)
@@ -30,33 +39,38 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
         var userId = _jwtTokenService.GetUserIdFromToken(request.AccessToken)
             ?? throw new ForbiddenException("Invalid access token.");
 
-        var storedToken = await _context.RefreshTokens
-            .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken && rt.UserId == userId, cancellationToken)
+        var tokenHash = DomainRefreshToken.Hash(request.RefreshToken);
+
+        var storedToken = await _refreshTokens.GetByHashAsync(tokenHash, cancellationToken)
             ?? throw new ForbiddenException("Refresh token not found.");
 
+        if (storedToken.UserId != userId)
+            throw new ForbiddenException("Refresh token does not belong to this user.");
+
         if (!storedToken.IsActive)
+        {
+            // A revoked token being presented again is the classic replay signature: the
+            // safe response is to invalidate the whole chain and force a fresh login.
+            _logger.LogWarning(
+                "Refresh token replay detected for user {UserId}. Revoking all active tokens.", userId);
+            await _refreshTokens.RevokeAllForUserAsync(userId, cancellationToken);
             throw new ForbiddenException("Refresh token is expired or revoked.");
+        }
 
         var user = await _userManager.FindByIdAsync(userId.ToString())
             ?? throw new NotFoundException(nameof(User), userId);
 
         var roles = await _userManager.GetRolesAsync(user);
 
-        storedToken.Revoke();
-        var newAccessToken = _jwtTokenService.GenerateAccessToken(user, roles);
-        var newRefreshValue = _jwtTokenService.GenerateRefreshToken();
-        var newRefreshToken = DomainRefreshToken.Create(user.Id, newRefreshValue, DateTimeOffset.UtcNow.AddDays(7));
+        return await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            var (result, issued) = await _tokenIssuer.IssueAsync(user, roles, ct);
 
-        _context.RefreshTokens.Add(newRefreshToken);
-        await _context.SaveChangesAsync(cancellationToken);
+            // Rotation: the presented token dies here and points at its replacement.
+            storedToken.RotateTo(issued);
+            await _refreshTokens.UpdateAsync(storedToken, ct);
 
-        return new AuthResultDto(
-            AccessToken: newAccessToken,
-            RefreshToken: newRefreshValue,
-            UserId: user.Id,
-            Name: user.Name,
-            Email: user.Email!,
-            Role: user.Role.ToString()
-        );
+            return result;
+        }, cancellationToken);
     }
 }
