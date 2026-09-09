@@ -1,4 +1,5 @@
 using Flow.Application.Common.Exceptions;
+using Flow.Application.Common.Interfaces;
 using Flow.Application.Common.Persistence;
 using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
@@ -13,17 +14,20 @@ public class RejectIdeaCommandHandler : IRequestHandler<RejectIdeaCommand>
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuditTrail _audit;
     private readonly NotificationPublisher _notifications;
+    private readonly IFlowMetrics _metrics;
 
     public RejectIdeaCommandHandler(
         IIdeaRepository ideas,
         IUnitOfWork unitOfWork,
         AuditTrail audit,
-        NotificationPublisher notifications)
+        NotificationPublisher notifications,
+        IFlowMetrics metrics)
     {
         _ideas = ideas;
         _unitOfWork = unitOfWork;
         _audit = audit;
         _notifications = notifications;
+        _metrics = metrics;
     }
 
     public async Task Handle(RejectIdeaCommand request, CancellationToken cancellationToken)
@@ -54,5 +58,7 @@ public class RejectIdeaCommandHandler : IRequestHandler<RejectIdeaCommand>
                 $"IdeaRejected:{idea.Id}:{idea.SubmittedBy}",
                 ct);
         }, cancellationToken);
+
+        _metrics.IdeaRejected();
     }
 }

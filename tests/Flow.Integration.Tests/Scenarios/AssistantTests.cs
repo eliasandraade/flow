@@ -282,6 +282,14 @@ public class AssistantTests
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable,
             because: "a degraded dependency is not a client error and not a broken product");
 
+        // The assistant's failures are the one class of message written for the end user,
+        // so they are promoted to userMessage and shown verbatim. Everything else the
+        // client translates itself, because Title carries developer English.
+        var problem = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        problem.GetProperty("userMessage").GetString()
+            .Should().NotBeNullOrWhiteSpace().And.NotContain("Exception");
+        problem.TryGetProperty("traceId", out _).Should().BeTrue();
+
         var runs = await factory.Mongo.AssistantRuns
             .Find(Builders<AssistantRun>.Filter.Empty).ToListAsync();
 

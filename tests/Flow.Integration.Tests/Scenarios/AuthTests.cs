@@ -67,7 +67,7 @@ public class AuthTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task Login_WithWrongPassword_IsForbidden()
+    public async Task Login_WithWrongPassword_Is401()
     {
         RequireDatabase();
         var client = Factory.CreateClient();
@@ -79,7 +79,10 @@ public class AuthTests : IntegrationTestBase
         var response = await client.PostAsJsonAsync("/api/v1/auth/login",
             new { email, password = "SenhaErrada1!" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        // 401, not 403: the caller failed to prove who they are. 403 would mean the
+        // identity was accepted and the action refused, which is a different problem and
+        // sends the client down a different path.
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -176,13 +179,13 @@ public class AuthTests : IntegrationTestBase
         var replay = await client.PostAsJsonAsync("/api/v1/auth/refresh",
             new { accessToken = original.AccessToken, refreshToken = original.RefreshToken });
 
-        replay.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        replay.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         // And the whole chain is invalidated, so the stolen-but-newer token dies too.
         var afterRevocation = await client.PostAsJsonAsync("/api/v1/auth/refresh",
             new { accessToken = renewed.AccessToken, refreshToken = renewed.RefreshToken });
 
-        afterRevocation.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        afterRevocation.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -207,7 +210,7 @@ public class AuthTests : IntegrationTestBase
         var refreshAfterLogout = await client.PostAsJsonAsync("/api/v1/auth/refresh",
             new { accessToken = session.AccessToken, refreshToken = session.RefreshToken });
 
-        refreshAfterLogout.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        refreshAfterLogout.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]

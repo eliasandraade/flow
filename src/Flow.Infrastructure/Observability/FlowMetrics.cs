@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using Flow.Application.Common.Interfaces;
 
 namespace Flow.Infrastructure.Observability;
 
@@ -9,7 +10,7 @@ namespace Flow.Infrastructure.Observability;
 /// breaks the backend long before it answers a useful question. Attribution per user
 /// already lives in the audit log and in the traces.
 /// </summary>
-public sealed class FlowMetrics
+public sealed class FlowMetrics : IFlowMetrics
 {
     private readonly Counter<long> _ideasSubmitted;
     private readonly Counter<long> _ideasApproved;

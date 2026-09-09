@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Flow.Integration.Tests.Fixtures;
 
@@ -22,13 +23,18 @@ public sealed class FlowApiFactory : WebApplicationFactory<Program>
     private readonly string _databaseName;
 
     private readonly Action<IServiceCollection>? _overrideServices;
+    private readonly Dictionary<string, string?>? _overrideConfiguration;
 
-    public FlowApiFactory(MongoFixture mongo, Action<IServiceCollection>? overrideServices = null)
+    public FlowApiFactory(
+        MongoFixture mongo,
+        Action<IServiceCollection>? overrideServices = null,
+        Dictionary<string, string?>? overrideConfiguration = null)
     {
         _connectionString = mongo.ConnectionString;
         // A database per factory keeps parallel test classes from seeing each other's data.
         _databaseName = $"{mongo.DatabaseName}_{Guid.NewGuid():N}"[..26];
         _overrideServices = overrideServices;
+        _overrideConfiguration = overrideConfiguration;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -51,8 +57,17 @@ public sealed class FlowApiFactory : WebApplicationFactory<Program>
                 ["JwtSettings:ExpiryMinutes"] = "15",
                 ["Auth:RefreshTokenDays"] = "7",
                 ["SEED_DEMO_DATA"] = "false",
+                // The suite drives hundreds of requests from a single address. The limiter
+                // is exercised by its own test rather than fought by every other one.
+                ["RateLimiting:Enabled"] = "false",
                 ["Swagger:Enabled"] = "false"
             });
+
+            // Applied last so a test can override any of the defaults above. Program reads
+            // some settings straight from configuration, so overriding them in DI would
+            // have no effect.
+            if (_overrideConfiguration is not null)
+                config.AddInMemoryCollection(_overrideConfiguration);
         });
     }
 

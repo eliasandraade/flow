@@ -32,7 +32,7 @@ public sealed class RejectIdeaCommandValidator : AbstractValidator<RejectIdeaCom
 {
     public RejectIdeaCommandValidator() =>
         RuleFor(x => x.ManagerComment)
-            .NotEmpty().WithMessage("A rejection must state why.")
+            .NotEmpty().WithMessage("Informe o motivo da recusa.")
             .MaximumLength(2000);
 }
 

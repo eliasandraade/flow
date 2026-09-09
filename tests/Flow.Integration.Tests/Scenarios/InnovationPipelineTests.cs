@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using System.Net.Http.Json;
 using Flow.Domain.Entities;
 using Flow.Domain.Enums;
@@ -201,6 +202,38 @@ public class InnovationPipelineTests : IntegrationTestBase
             $"/api/v1/ideas/{ideaId}/reject", new { managerComment = "" });
 
         withoutReason.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task ValidationMessages_ComeBackInPortuguese()
+    {
+        RequireDatabase();
+        var operatorClient = await Factory.CreateClientAsAsync(UserRole.Operator);
+
+        // An empty title trips FluentValidation's built-in NotEmpty, not a custom message:
+        // this is what proves the whole rule set is localised, not just the few strings
+        // written by hand.
+        var response = await operatorClient.PostAsJsonAsync("/api/v1/ideas", new
+        {
+            title = "",
+            description = "Descrição suficiente para o teste.",
+            problem = "Problema suficiente para o teste."
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var messages = problem.GetProperty("errors").GetProperty("Title")
+            .EnumerateArray().Select(item => item.GetString()!).ToList();
+
+        messages.Should().NotBeEmpty();
+        messages.Should().OnlyContain(message => !message.Contains("must not be empty"),
+            because: "the interface is pt-BR and the user reads these verbatim");
+
+        // Both halves have to be translated: the rule's wording and the field's name. A
+        // message like "'Title' deve ser informado" is a half-translated interface.
+        messages.Should().OnlyContain(message => !message.Contains("Title"));
+        messages.Should().Contain(message => message.Contains("título"));
     }
 
     // ─── FlowScore ──────────────────────────────────────────────────────────

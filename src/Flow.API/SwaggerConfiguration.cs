@@ -52,6 +52,38 @@ public static class SwaggerConfiguration
         });
 
         c.SupportNonNullableReferenceTypes();
-        c.CustomSchemaIds(type => type.FullName?.Replace("+", ".").Split('.').Last());
+        c.CustomSchemaIds(SchemaIdFor);
+    }
+
+    /// <summary>
+    /// Readable, collision-free schema names.
+    ///
+    /// Taking only the last name segment reads nicely but breaks the moment two
+    /// controllers declare a nested request type with the same name — which is exactly
+    /// what happened with CompareIdeasRequest on both IdeasController and
+    /// AssistantController, and it fails at generation time, producing no specification at
+    /// all. Nested types therefore keep their declaring type as a prefix.
+    /// </summary>
+    private static string SchemaIdFor(Type type)
+    {
+        var name = type.IsNested && type.DeclaringType is not null
+            ? $"{Simplify(type.DeclaringType.Name)}{Simplify(type.Name)}"
+            : Simplify(type.Name);
+
+        if (!type.IsGenericType) return name;
+
+        // Generic arguments are appended so List<Foo> and List<Bar> stay distinct.
+        var arguments = string.Join("", type.GetGenericArguments().Select(SchemaIdFor));
+        return $"{name.Split('`')[0]}{arguments}";
+    }
+
+    private static string Simplify(string name)
+    {
+        var trimmed = name.Split('`')[0];
+
+        // "IdeasController" adds nothing to "IdeasControllerUpdateIdeaRequest".
+        return trimmed.EndsWith("Controller", StringComparison.Ordinal)
+            ? trimmed[..^"Controller".Length]
+            : trimmed;
     }
 }

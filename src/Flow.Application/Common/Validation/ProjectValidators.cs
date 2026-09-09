@@ -47,7 +47,7 @@ public sealed class BlockProjectCommandValidator : AbstractValidator<BlockProjec
 {
     public BlockProjectCommandValidator() =>
         RuleFor(x => x.Reason)
-            .NotEmpty().WithMessage("Blocking a project requires a reason.")
+            .NotEmpty().WithMessage("Informe o motivo do bloqueio.")
             .MaximumLength(2000);
 }
 
@@ -55,7 +55,7 @@ public sealed class CancelProjectCommandValidator : AbstractValidator<CancelProj
 {
     public CancelProjectCommandValidator() =>
         RuleFor(x => x.Reason)
-            .NotEmpty().WithMessage("Cancelling a project requires a reason.")
+            .NotEmpty().WithMessage("Informe o motivo do cancelamento.")
             .MaximumLength(2000);
 }
 

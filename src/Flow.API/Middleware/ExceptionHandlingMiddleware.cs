@@ -55,6 +55,10 @@ public class ExceptionHandlingMiddleware
                 (HttpStatusCode.NotFound, nfe.Message, (object?)null),
             ConflictException ce =>
                 (HttpStatusCode.Conflict, ce.Message, (object?)null),
+            // 401 is "I do not know who you are", 403 is "I know, and no". The client
+            // reacts differently to each, so they must not be collapsed.
+            UnauthorizedException ue =>
+                (HttpStatusCode.Unauthorized, ue.Message, (object?)null),
             ForbiddenException fe =>
                 (HttpStatusCode.Forbidden, fe.Message, (object?)null),
             // The assistant being unreachable is a degraded dependency, not a client error
@@ -82,6 +86,14 @@ public class ExceptionHandlingMiddleware
 
         if (errors is not null)
             problem.Extensions["errors"] = errors;
+
+        // Domain and application exception messages are written for developers and are in
+        // English, like the rest of the code — and they end up in Title, which is fine for
+        // a log or a support ticket. What the user reads is decided by the client, which
+        // owns the pt-BR copy. The only messages promoted to user-facing text are the ones
+        // deliberately authored as such.
+        if (exception is Flow.Application.Assistant.AssistantUnavailableException)
+            problem.Extensions["userMessage"] = exception.Message;
 
         var traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
         problem.Extensions["traceId"] = traceId;

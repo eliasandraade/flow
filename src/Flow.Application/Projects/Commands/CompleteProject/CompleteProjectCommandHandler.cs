@@ -36,7 +36,7 @@ public class CompleteProjectCommandHandler : IRequestHandler<CompleteProjectComm
         project.Complete();
 
         await _recorder.RecordAsync(
-            project, "Completed",
+            project, ProjectActions.Completed,
             previousValue: previous,
             alsoInTransaction: async ct =>
             {

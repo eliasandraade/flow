@@ -27,15 +27,18 @@ public sealed class AssistantRunRecorder
     private readonly IAssistantRunRepository _runs;
     private readonly ICurrentUserService _currentUser;
     private readonly ICorrelationIdAccessor _correlation;
+    private readonly IFlowMetrics _metrics;
 
     public AssistantRunRecorder(
         IAssistantRunRepository runs,
         ICurrentUserService currentUser,
-        ICorrelationIdAccessor correlation)
+        ICorrelationIdAccessor correlation,
+        IFlowMetrics metrics)
     {
         _runs = runs;
         _currentUser = currentUser;
         _correlation = correlation;
+        _metrics = metrics;
     }
 
     public async Task<AssistantRun> RecordAsync<T>(
@@ -62,6 +65,14 @@ public sealed class AssistantRunRecorder
             errorKind: result.Outcome == AssistantOutcomeKind.Success ? null : result.Outcome.ToString());
 
         await _runs.AddAsync(run, cancellationToken);
+
+        var label = operation.ToString();
+        _metrics.AiRequest(label);
+        _metrics.AiLatency(label, result.LatencyMs);
+
+        if (result.Outcome != AssistantOutcomeKind.Success)
+            _metrics.AiFailure(label, result.Outcome.ToString());
+
         return run;
     }
 

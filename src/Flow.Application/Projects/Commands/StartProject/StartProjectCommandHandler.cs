@@ -24,6 +24,6 @@ public class StartProjectCommandHandler : IRequestHandler<StartProjectCommand>
         project.Start();
 
         await _recorder.RecordAsync(
-            project, "Started", previousValue: previous, cancellationToken: cancellationToken);
+            project, ProjectActions.Started, previousValue: previous, cancellationToken: cancellationToken);
     }
 }

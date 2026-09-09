@@ -61,7 +61,7 @@ public sealed class GeminiStructuredClient
         if (!IsConfigured)
             return new AssistantResult<T>(
                 AssistantOutcomeKind.NotConfigured, null, _options.Model, 0,
-                Error: "GEMINI_API_KEY is not configured.");
+                Error: "Gemini:ApiKey is not configured.");
 
         if (!_circuitBreaker.AllowRequest())
             return new AssistantResult<T>(

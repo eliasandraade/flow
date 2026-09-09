@@ -9,6 +9,8 @@ export interface ProblemDetails {
   instance?: string;
   traceId?: string;
   errors?: Record<string, string[]>;
+  /** Set by the API only when the message was written to be shown to the user. */
+  userMessage?: string;
 }
 
 export type ApiErrorKind =
@@ -106,17 +108,19 @@ export function kindForStatus(status: number): ApiErrorKind {
 }
 
 /**
- * Prefers the server's own wording when it is meaningful — a rejected transition explains
- * itself far better than a generic message — and falls back to ours otherwise.
+ * The interface is pt-BR, so the copy shown to the user lives here.
+ *
+ * `title` is deliberately NOT used: it carries the server's exception message, which is
+ * written for developers and in English. It stays useful for support — it travels with the
+ * traceId — but echoing it would put English in a Portuguese app. The server marks the
+ * messages it wrote *for the user* with `userMessage`, and only those are shown verbatim.
+ *
+ * Field-level messages come through `errors` and are already localised by the API.
  */
 export function buildApiError(status: number, problem: ProblemDetails | null): ApiError {
   const kind = kindForStatus(status);
 
-  const serverMessage =
-    problem?.detail?.trim() ||
-    (problem?.title?.trim() && problem.title !== 'Validation failed'
-      ? problem.title.trim()
-      : undefined);
+  const serverMessage = problem?.userMessage?.trim() || undefined;
 
   return new ApiError({
     kind,

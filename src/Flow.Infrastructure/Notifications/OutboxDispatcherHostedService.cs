@@ -1,7 +1,6 @@
 using Flow.Application.Common.Interfaces;
 using Flow.Application.Common.Persistence;
 using Flow.Domain.Entities;
-using Flow.Infrastructure.Observability;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -93,7 +92,7 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
 
         var outbox = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
         var sender = scope.ServiceProvider.GetRequiredService<IPushNotificationSender>();
-        var metrics = scope.ServiceProvider.GetService<FlowMetrics>();
+        var metrics = scope.ServiceProvider.GetService<IFlowMetrics>();
 
         var due = await outbox.GetDueAsync(DateTimeOffset.UtcNow, _options.BatchSize, cancellationToken);
         if (due.Count == 0) return 0;

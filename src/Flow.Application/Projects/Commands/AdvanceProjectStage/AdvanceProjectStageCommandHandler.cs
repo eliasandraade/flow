@@ -25,7 +25,7 @@ public class AdvanceProjectStageCommandHandler : IRequestHandler<AdvanceProjectS
         project.AdvanceStage(request.Stage);
 
         await _recorder.RecordAsync(
-            project, "StageChanged",
+            project, ProjectActions.StageChanged,
             previousValue: previous,
             newValue: project.Stage.ToString(),
             cancellationToken: cancellationToken);

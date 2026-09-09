@@ -1,3 +1,4 @@
+using Flow.Application.Common.Interfaces;
 using Flow.Application.Common.Persistence;
 using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
@@ -19,17 +20,20 @@ public sealed class ProjectTransitionRecorder
     private readonly IProjectSnapshotRepository _snapshots;
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuditTrail _audit;
+    private readonly IFlowMetrics _metrics;
 
     public ProjectTransitionRecorder(
         IProjectRepository projects,
         IProjectSnapshotRepository snapshots,
         IUnitOfWork unitOfWork,
-        AuditTrail audit)
+        AuditTrail audit,
+        IFlowMetrics metrics)
     {
         _projects = projects;
         _snapshots = snapshots;
         _unitOfWork = unitOfWork;
         _audit = audit;
+        _metrics = metrics;
     }
 
     public Guid ActorId => _audit.ActorId;
@@ -39,7 +43,7 @@ public sealed class ProjectTransitionRecorder
     /// <param name="alsoInTransaction">
     /// Extra writes that must share the transaction, typically notifications.
     /// </param>
-    public Task RecordAsync(
+    public async Task RecordAsync(
         Project project,
         string action,
         string? previousValue = null,
@@ -51,7 +55,7 @@ public sealed class ProjectTransitionRecorder
     {
         var actorId = _audit.ActorId;
 
-        return _unitOfWork.ExecuteAsync(async ct =>
+        await _unitOfWork.ExecuteAsync(async ct =>
         {
             if (isNew)
                 await _projects.AddAsync(project, ct);
@@ -71,5 +75,14 @@ public sealed class ProjectTransitionRecorder
             if (alsoInTransaction is not null)
                 await alsoInTransaction(ct);
         }, cancellationToken);
+
+        // Recorded after the commit: a rolled-back transition never happened, and a
+        // counter that includes failures is worse than no counter.
+        switch (action)
+        {
+            case ProjectActions.Created: _metrics.ProjectCreated(); break;
+            case ProjectActions.Blocked: _metrics.ProjectBlocked(); break;
+            case ProjectActions.Completed: _metrics.ProjectCompleted(); break;
+        }
     }
 }

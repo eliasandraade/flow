@@ -51,7 +51,7 @@ public class CreateProjectCommandHandler : IRequestHandler<CreateProjectCommand,
 
         await _recorder.RecordAsync(
             project,
-            action: "Created",
+            action: ProjectActions.Created,
             isNew: true,
             alsoInTransaction: ct => _notifications.PublishAsync(
                 owner.Id,

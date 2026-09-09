@@ -1,4 +1,5 @@
 using Flow.Application.Common.Exceptions;
+using Flow.Application.Common.Interfaces;
 using Flow.Application.Common.Persistence;
 using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
@@ -17,6 +18,7 @@ public class ApproveIdeaCommandHandler : IRequestHandler<ApproveIdeaCommand>
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuditTrail _audit;
     private readonly NotificationPublisher _notifications;
+    private readonly IFlowMetrics _metrics;
 
     public ApproveIdeaCommandHandler(
         IIdeaRepository ideas,
@@ -24,7 +26,8 @@ public class ApproveIdeaCommandHandler : IRequestHandler<ApproveIdeaCommand>
         IPointLedgerRepository pointLedger,
         IUnitOfWork unitOfWork,
         AuditTrail audit,
-        NotificationPublisher notifications)
+        NotificationPublisher notifications,
+        IFlowMetrics metrics)
     {
         _ideas = ideas;
         _users = users;
@@ -32,6 +35,7 @@ public class ApproveIdeaCommandHandler : IRequestHandler<ApproveIdeaCommand>
         _unitOfWork = unitOfWork;
         _audit = audit;
         _notifications = notifications;
+        _metrics = metrics;
     }
 
     public async Task Handle(ApproveIdeaCommand request, CancellationToken cancellationToken)
@@ -72,5 +76,7 @@ public class ApproveIdeaCommandHandler : IRequestHandler<ApproveIdeaCommand>
                 $"IdeaApproved:{idea.Id}:{idea.SubmittedBy}",
                 ct);
         }, cancellationToken);
+
+        _metrics.IdeaApproved();
     }
 }

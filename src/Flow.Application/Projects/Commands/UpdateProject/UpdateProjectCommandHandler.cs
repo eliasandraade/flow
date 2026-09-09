@@ -36,7 +36,7 @@ public class UpdateProjectCommandHandler : IRequestHandler<UpdateProjectCommand>
             request.EstimatedCost, request.ActualCost, request.Deadline);
 
         await _recorder.RecordAsync(
-            project, "Updated",
+            project, ProjectActions.Updated,
             previousValue: previousTitle,
             newValue: project.Title,
             cancellationToken: cancellationToken);

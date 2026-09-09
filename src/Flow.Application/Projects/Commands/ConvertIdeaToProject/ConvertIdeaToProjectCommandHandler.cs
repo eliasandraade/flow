@@ -70,7 +70,7 @@ public class ConvertIdeaToProjectCommandHandler
 
         await _recorder.RecordAsync(
             project,
-            action: "Created",
+            action: ProjectActions.Created,
             newValue: project.Status.ToString(),
             reason: $"Converted from idea {idea.Id}",
             isNew: true,

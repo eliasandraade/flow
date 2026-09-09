@@ -1,4 +1,5 @@
 using Flow.Application.Common.Exceptions;
+using Flow.Application.Common.Interfaces;
 using Flow.Application.Common.Persistence;
 using Flow.Application.Common.Services;
 using Flow.Domain.Entities;
@@ -14,19 +15,22 @@ public class SubmitIdeaCommandHandler : IRequestHandler<SubmitIdeaCommand>
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuditTrail _audit;
     private readonly NotificationPublisher _notifications;
+    private readonly IFlowMetrics _metrics;
 
     public SubmitIdeaCommandHandler(
         IIdeaRepository ideas,
         IUserRepository users,
         IUnitOfWork unitOfWork,
         AuditTrail audit,
-        NotificationPublisher notifications)
+        NotificationPublisher notifications,
+        IFlowMetrics metrics)
     {
         _ideas = ideas;
         _users = users;
         _unitOfWork = unitOfWork;
         _audit = audit;
         _notifications = notifications;
+        _metrics = metrics;
     }
 
     public async Task Handle(SubmitIdeaCommand request, CancellationToken cancellationToken)
@@ -68,5 +72,7 @@ public class SubmitIdeaCommandHandler : IRequestHandler<SubmitIdeaCommand>
                 managerId => $"IdeaAwaitingReview:{idea.Id}:{managerId}",
                 ct);
         }, cancellationToken);
+
+        _metrics.IdeaSubmitted();
     }
 }

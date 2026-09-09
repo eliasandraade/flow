@@ -15,7 +15,7 @@ public sealed class CreateGuidelineCommandValidator : AbstractValidator<CreateGu
         RuleFor(x => x.ValidUntil)
             .GreaterThan(x => x.ValidFrom)
             .When(x => x.ValidUntil.HasValue)
-            .WithMessage("ValidUntil must be later than ValidFrom.");
+            .WithMessage("A data final deve ser posterior à data inicial.");
     }
 }
 
@@ -30,6 +30,6 @@ public sealed class UpdateGuidelineCommandValidator : AbstractValidator<UpdateGu
         RuleFor(x => x.ValidUntil)
             .GreaterThan(x => x.ValidFrom)
             .When(x => x.ValidUntil.HasValue)
-            .WithMessage("ValidUntil must be later than ValidFrom.");
+            .WithMessage("A data final deve ser posterior à data inicial.");
     }
 }

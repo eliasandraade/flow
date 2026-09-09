@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.RateLimiting;
 using Flow.API;
 using Flow.API.Middleware;
@@ -11,7 +12,9 @@ using Flow.Infrastructure.Persistence.Mongo;
 using Flow.Infrastructure.Seeding;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -75,7 +78,19 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 // CORS — explicit origins only. A wildcard would be a silent invitation.
 // ---------------------------------------------------------------------------
 const string CorsPolicy = "flow-clients";
+
+// Accepts either the structured Cors:AllowedOrigins array or a comma-separated
+// CORS_ALLOWED_ORIGINS variable, because a list is awkward to express as an env var and
+// containers only have env vars.
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+
+var originsFromEnvironment = builder.Configuration["CORS_ALLOWED_ORIGINS"];
+if (!string.IsNullOrWhiteSpace(originsFromEnvironment))
+{
+    allowedOrigins = originsFromEnvironment
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .ToArray();
+}
 
 builder.Services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
 {
@@ -91,41 +106,58 @@ builder.Services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
 // Rate limiting — authentication and the AI endpoints are the two surfaces where
 // abuse is cheap for the attacker and expensive for us.
 // ---------------------------------------------------------------------------
+builder.Services.Configure<RateLimitOptions>(
+    builder.Configuration.GetSection(RateLimitOptions.SectionName));
+
+// Limits are resolved per request from options rather than captured here, because code
+// that reads builder.Configuration before Build() cannot see configuration supplied by a
+// test host — and a control that silently ignores its configuration is worse than none.
+static RateLimitOptions LimitsFor(HttpContext http) =>
+    http.RequestServices.GetRequiredService<IOptionsMonitor<RateLimitOptions>>().CurrentValue;
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
     options.AddPolicy(RateLimitPolicies.Auth, http =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
+        !LimitsFor(http).Enabled
+            ? RateLimitPartition.GetNoLimiter<string>("disabled")
+            : RateLimitPartition.GetFixedWindowLimiter(
+                http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = LimitsFor(http).AuthPermitPerMinute,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0
+                }));
 
+    // Partitioned by user rather than by address: these calls cost real money, and one
+    // user behind a shared NAT should not consume everyone else's budget.
     options.AddPolicy(RateLimitPolicies.Ai, http =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            http.User.FindFirst("sub")?.Value
-                ?? http.Connection.RemoteIpAddress?.ToString()
-                ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 20,
-                Window = TimeSpan.FromMinutes(5),
-                QueueLimit = 0
-            }));
+        !LimitsFor(http).Enabled
+            ? RateLimitPartition.GetNoLimiter<string>("disabled")
+            : RateLimitPartition.GetFixedWindowLimiter(
+                http.User.FindFirst("sub")?.Value
+                    ?? http.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = LimitsFor(http).AiPermitPerFiveMinutes,
+                    Window = TimeSpan.FromMinutes(5),
+                    QueueLimit = 0
+                }));
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 300,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
+        LimitsFor(http).Enabled
+            ? RateLimitPartition.GetFixedWindowLimiter(
+                http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = LimitsFor(http).GlobalPermitPerMinute,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0
+                })
+            : RateLimitPartition.GetNoLimiter("disabled"));
 });
 
 // ---------------------------------------------------------------------------
@@ -134,6 +166,7 @@ builder.Services.AddRateLimiter(options =>
 var otlpEndpoint = builder.Configuration["OpenTelemetry:OtlpEndpoint"];
 
 builder.Services.AddSingleton<FlowMetrics>();
+builder.Services.AddSingleton<IFlowMetrics>(sp => sp.GetRequiredService<FlowMetrics>());
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService(
@@ -185,6 +218,40 @@ builder.Services.AddControllers()
     {
         options.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter());
+    })
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        // FluentValidation is the single validation authority, and it answers 422 with a
+        // traceId. Model binding still rejects malformed JSON and wrong types before any
+        // handler runs, and without this those come back as a 400 in a different shape —
+        // two contracts for the same class of problem. This makes binding failures speak
+        // the same language as everything else.
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var errors = context.ModelState
+                .Where(entry => entry.Value?.Errors.Count > 0)
+                .ToDictionary(
+                    entry => entry.Key,
+                    entry => entry.Value!.Errors.Select(error => error.ErrorMessage).ToArray());
+
+            var problem = new ProblemDetails
+            {
+                Title = "Validation failed",
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Type = "https://httpstatuses.io/422",
+                Instance = context.HttpContext.Request.Path
+            };
+
+            problem.Extensions["errors"] = errors;
+            problem.Extensions["traceId"] =
+                Activity.Current?.TraceId.ToString() ?? context.HttpContext.TraceIdentifier;
+
+            return new ObjectResult(problem)
+            {
+                StatusCode = StatusCodes.Status422UnprocessableEntity,
+                ContentTypes = { "application/problem+json" }
+            };
+        };
     });
 
 builder.Services.AddEndpointsApiExplorer();

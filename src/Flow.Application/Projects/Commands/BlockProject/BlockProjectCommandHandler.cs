@@ -38,7 +38,7 @@ public class BlockProjectCommandHandler : IRequestHandler<BlockProjectCommand>
         var blockKey = project.BlockedSince!.Value.Ticks;
 
         await _recorder.RecordAsync(
-            project, "Blocked",
+            project, ProjectActions.Blocked,
             previousValue: previous,
             reason: request.Reason,
             alsoInTransaction: async ct =>

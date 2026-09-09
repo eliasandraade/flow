@@ -6,11 +6,16 @@ using Flow.Application.Auth.Commands.Register;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Flow.API.Controllers;
 
 [ApiController]
 [Route("api/v1/auth")]
+// Credential stuffing is cheap for an attacker and expensive for us, so the whole
+// authentication surface is rate limited per source address.
+[EnableRateLimiting(RateLimitPolicies.Auth)]
+[Produces("application/json")]
 public class AuthController : ControllerBase
 {
     private readonly IMediator _mediator;

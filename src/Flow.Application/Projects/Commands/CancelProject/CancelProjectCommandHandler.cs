@@ -31,7 +31,7 @@ public class CancelProjectCommandHandler : IRequestHandler<CancelProjectCommand>
         project.Cancel(request.Reason);
 
         await _recorder.RecordAsync(
-            project, "Cancelled",
+            project, ProjectActions.Cancelled,
             previousValue: previous,
             reason: request.Reason,
             alsoInTransaction: ct => _notifications.PublishAsync(

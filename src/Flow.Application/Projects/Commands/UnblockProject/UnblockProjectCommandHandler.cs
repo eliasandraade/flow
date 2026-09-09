@@ -36,7 +36,7 @@ public class UnblockProjectCommandHandler : IRequestHandler<UnblockProjectComman
             : (int)(DateTimeOffset.UtcNow - blockedSince.Value).TotalDays;
 
         await _recorder.RecordAsync(
-            project, "Unblocked",
+            project, ProjectActions.Unblocked,
             previousValue: previous,
             reason: daysBlocked is null ? null : $"Blocked for {daysBlocked} day(s)",
             alsoInTransaction: ct => _notifications.PublishAsync(

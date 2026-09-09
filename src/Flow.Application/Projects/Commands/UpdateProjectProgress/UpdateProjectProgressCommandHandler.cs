@@ -40,7 +40,7 @@ public class UpdateProjectProgressCommandHandler : IRequestHandler<UpdateProject
             : [];
 
         await _recorder.RecordAsync(
-            project, "ProgressUpdated",
+            project, ProjectActions.ProgressUpdated,
             previousValue: previous.ToString(),
             newValue: project.ProgressPercentage.ToString(),
             alsoInTransaction: async ct =>

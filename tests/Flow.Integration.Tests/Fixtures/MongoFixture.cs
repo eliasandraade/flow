@@ -45,8 +45,9 @@ public sealed class MongoFixture : IAsyncLifetime
 
         try
         {
-            _container = new MongoDbBuilder()
-                .WithImage("mongo:8.0")
+            // The image goes to the constructor: the parameterless overload is obsolete
+            // in Testcontainers 4.x.
+            _container = new MongoDbBuilder("mongo:8.0")
                 .WithReplicaSet()
                 .Build();
 

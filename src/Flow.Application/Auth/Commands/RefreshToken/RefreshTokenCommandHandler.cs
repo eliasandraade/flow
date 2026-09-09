@@ -37,15 +37,15 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
     public async Task<AuthResultDto> Handle(RefreshTokenCommand request, CancellationToken cancellationToken)
     {
         var userId = _jwtTokenService.GetUserIdFromToken(request.AccessToken)
-            ?? throw new ForbiddenException("Invalid access token.");
+            ?? throw new UnauthorizedException("Invalid access token.");
 
         var tokenHash = DomainRefreshToken.Hash(request.RefreshToken);
 
         var storedToken = await _refreshTokens.GetByHashAsync(tokenHash, cancellationToken)
-            ?? throw new ForbiddenException("Refresh token not found.");
+            ?? throw new UnauthorizedException("Refresh token not found.");
 
         if (storedToken.UserId != userId)
-            throw new ForbiddenException("Refresh token does not belong to this user.");
+            throw new UnauthorizedException("Refresh token does not belong to this user.");
 
         if (!storedToken.IsActive)
         {
@@ -54,7 +54,7 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
             _logger.LogWarning(
                 "Refresh token replay detected for user {UserId}. Revoking all active tokens.", userId);
             await _refreshTokens.RevokeAllForUserAsync(userId, cancellationToken);
-            throw new ForbiddenException("Refresh token is expired or revoked.");
+            throw new UnauthorizedException("Refresh token is expired or revoked.");
         }
 
         var user = await _userManager.FindByIdAsync(userId.ToString())
