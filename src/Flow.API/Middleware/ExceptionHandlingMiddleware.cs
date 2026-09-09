@@ -57,6 +57,10 @@ public class ExceptionHandlingMiddleware
                 (HttpStatusCode.Conflict, ce.Message, (object?)null),
             ForbiddenException fe =>
                 (HttpStatusCode.Forbidden, fe.Message, (object?)null),
+            // The assistant being unreachable is a degraded dependency, not a client error
+            // and not a broken product: everything else keeps working.
+            Flow.Application.Assistant.AssistantUnavailableException au =>
+                (HttpStatusCode.ServiceUnavailable, au.Message, (object?)null),
             Flow.Domain.Exceptions.DomainException de =>
                 (HttpStatusCode.Conflict, de.Message, (object?)null),
             OperationCanceledException =>

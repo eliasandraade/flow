@@ -1,8 +1,11 @@
 using Flow.Application.Common.Persistence;
 using Flow.Application.Common.Interfaces;
 using Flow.Domain.Entities;
+using Flow.Application.Assistant;
+using Flow.Infrastructure.Assistant;
 using Flow.Infrastructure.Auth;
 using Flow.Infrastructure.Identity;
+using Flow.Infrastructure.Notifications;
 using Flow.Infrastructure.Observability;
 using Flow.Infrastructure.Persistence.Mongo;
 using Flow.Infrastructure.Persistence.Mongo.Repositories;
@@ -41,6 +44,56 @@ public static class DependencyInjection
         });
 
         services.AddScoped<DemoDataSeeder>();
+
+        services.AddNotifications(configuration);
+        services.AddAssistant(configuration);
+
+        return services;
+    }
+
+    private static IServiceCollection AddAssistant(
+        this IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<GeminiOptions>(configuration.GetSection(GeminiOptions.SectionName));
+
+        // The breaker holds state across requests, so it has to outlive them.
+        services.AddSingleton<CircuitBreaker>();
+        services.AddSingleton<GeminiStructuredClient>();
+
+        services.AddScoped<IInnovationAssistant, GeminiInnovationAssistant>();
+        services.AddScoped<IExecutiveInsightService, GeminiExecutiveInsightService>();
+
+        return services;
+    }
+
+    private static IServiceCollection AddNotifications(
+        this IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<OneSignalOptions>(configuration.GetSection(OneSignalOptions.SectionName));
+        services.Configure<OutboxOptions>(configuration.GetSection(OutboxOptions.SectionName));
+
+        var oneSignal = configuration.GetSection(OneSignalOptions.SectionName).Get<OneSignalOptions>()
+            ?? new OneSignalOptions();
+
+        services
+            .AddHttpClient<IPushNotificationSender, OneSignalPushSender>(
+                OneSignalPushSender.HttpClientName, client =>
+                {
+                    client.BaseAddress = new Uri(oneSignal.BaseUrl);
+                    client.Timeout = oneSignal.Timeout;
+                })
+            // Retrying a push is safe: delivery is idempotent through the dedupe key, both
+            // in our outbox and on the provider side.
+            .AddStandardResilienceHandler(options =>
+            {
+                options.Retry.MaxRetryAttempts = 2;
+                options.Retry.UseJitter = true;
+                options.AttemptTimeout.Timeout = oneSignal.Timeout;
+                options.TotalRequestTimeout.Timeout = oneSignal.Timeout * 4;
+                options.CircuitBreaker.SamplingDuration = oneSignal.Timeout * 8;
+            });
+
+        services.AddHostedService<OutboxDispatcherHostedService>();
 
         return services;
     }
