@@ -487,3 +487,4 @@ $RECYCLE.BIN/
 appsettings.Production.json
 appsettings.*.local.json
 mobile/dist/
+dist/

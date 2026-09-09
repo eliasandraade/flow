@@ -33,7 +33,7 @@ Audit logs and project snapshots are core infrastructure. Every state transition
 ```text
 Domain          — Entities, state machines and domain logic. No framework dependencies.
 Application     — Commands, queries, handlers and interfaces.
-Infrastructure  — EF Core, persistence and external adapters.
+Infrastructure  — MongoDB persistence, Identity stores and external adapters.
 API             — Controllers, middleware and dependency injection wiring.
 ```
 
@@ -71,8 +71,8 @@ Avoid premature generic helpers, unnecessary configuration, hypothetical infrast
 |---|---|
 | Architecture | Modular monolith with Clean Architecture |
 | Backend | ASP.NET Core 8, C# |
-| ORM | Entity Framework Core 8 |
-| Database | Azure SQL Database |
+| Data access | `MongoDB.Driver` (official driver, no ORM) |
+| Database | MongoDB 8.0, replica set required |
 | Mobile | React Native with Expo managed workflow |
 | Web | React + Vite for leadership dashboard |
 | Authentication | ASP.NET Core Identity + JWT |
@@ -111,9 +111,9 @@ State transitions are domain operations, never direct field assignments.
 
 ### Direct Database Mutation Is Forbidden
 
-Controllers and middleware must not mutate audited domain entities through `DbContext`, repositories, raw SQL, or other persistence shortcuts.
+Controllers and middleware must not mutate audited domain entities through repositories, the Mongo driver, or any other persistence shortcut.
 
-All writes to `Idea`, `Project`, and `Result` flow through Application command handlers and domain logic. Reference-data seeding and migrations are the only exceptions, and must not bypass the audit model for business entities.
+All writes to `Idea`, `Project`, and `Result` flow through Application command handlers and domain logic. Reference-data seeding and index creation are the only exceptions, and must not bypass the audit model for business entities.
 
 ---
 

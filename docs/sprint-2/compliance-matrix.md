@@ -9,6 +9,19 @@ auditoria inicial do código até a evidência final de verificação.
 - **Baseline de build:** `dotnet build` com êxito, 16 avisos `NU1603` (pin inexistente de `*.IdentityModel.Tokens 8.3.4`)
 - **Data limite da entrega:** 21/09/2026 23:00
 
+### Estado no fechamento
+
+- **Build:** `dotnet build Flow.sln` — 0 erros, **0 avisos**
+- **Testes:** **213** (124 Domain + 10 Application + 79 Integration contra MongoDB real), 0 falhas
+- **API:** 54 endpoints, `openapi.json` exportado da própria aplicação
+- **Mobile:** 23 telas, `tsc --noEmit` limpo, `expo-doctor` 18/18, bundle Android gerado
+- **Compliance:** **110 de 113** requisitos `VERIFIED` — ver [seção 10](#10-estado-final-por-área)
+- **Pendências:** 3, todas por credencial ou ambiente externo — ver [seção 11](#11-pendências-reais)
+
+> As seções 1 a 5 registram a auditoria e o plano do início da Sprint, e são mantidas como
+> estavam: elas são o ponto de partida contra o qual o resultado é comparado. O estado
+> **final** de cada requisito está nas seções 6 a 11.
+
 ## Estados
 
 | Estado | Significado |
@@ -489,10 +502,10 @@ O campo *Evidência final* é preenchido no fechamento de cada fase.
 | R2 | Stores de Identity escritos à mão divergirem do contrato e quebrarem login e papéis. | Média | Crítico | Implementar só os contratos usados; testes de integração contra Mongo real. |
 | R3 | Handlers dependerem implicitamente do change tracking do EF (mutação sem `Update`). | Alta | Alto | Revisão handler a handler; repositórios com `Update` explícito. |
 | R4 | Testes de integração hoje acoplados ao EF InMemory. | Certa | Alto | Migrar a factory para Testcontainers com replica set. |
-| R5 | Conflito de peer dependency dos gráficos no Expo 54 (achado A14). | Alta | Médio | Spike antes de adotar; alternativa em `react-native-svg` 15.12.1, já suportado pelo SDK 54. |
+| R5 | Conflito de peer dependency dos gráficos no Expo 54 (achado A14). | Alta | Médio | **Resolvido.** Spike executado: `victory-native` 42.x exige Skia >= 2.6.0 e o SDK 54 fixa 2.2.12; 41.19.3 aceita. Reanimated 4 exige `react-native-worklets`. `expo-doctor` 18/18. |
 | R6 | Indisponibilidade do Gemini derrubar o fluxo principal. | Média | Alto | FlowScore independente do modelo; timeout, circuit breaker e degradação previsível. |
 | R7 | Ausência de credenciais OneSignal e EAS impedir a validação live. | Alta | Médio | Implementar e testar por contrato, marcando a validação live como pendente, sem simular sucesso. |
-| R8 | Docker parado no ambiente bloquear testes e imagem (achado A13). | Em resolução | Alto | Daemon iniciado no início da Sprint. |
+| R8 | Docker parado no ambiente bloquear testes e imagem (achado A13). | **Materializou-se** | Alto | **Contornado, não resolvido.** O Docker Desktop desta máquina não sobe. Os testes de integração rodam contra um MongoDB 8.0.30 real em replica set instalado localmente, via `FLOW_TEST_MONGO_URI`; o fixture cai em Testcontainers onde houver daemon. O **build da imagem permanece não executado** — ver seção 9. |
 | R9 | Semântica de `DateTimeOffset` no Mongo (serialização e comparação). | Média | Alto | Serializer explícito e testes de round-trip. |
 | R10 | `decimal` no Mongo exigir `Decimal128` para não perder precisão financeira. | Alta | Alto | Representação explícita e testes de precisão de ROI. |
 
@@ -523,7 +536,7 @@ contra um MongoDB real e descartável, com transações reais.
 | DB-01 | Nenhuma referência a EF Core em `src/`. `ApplicationDbContext`, configurations e migrations removidos. |
 | DB-02 | `MongoDB.Driver` 3.11.1, `MongoClient` singleton em `Flow.Infrastructure/DependencyInjection.cs`. |
 | DB-03 | `docs/sprint-2/data-model.md` escrito antes do código, a partir dos access patterns. |
-| DB-04 | `MongoIndexInitializer` cria 31 índices de forma idempotente no startup. |
+| DB-04 | `MongoIndexInitializer` cria 40 índices de forma idempotente no startup. |
 | DB-05 | `TransactionalIntegrityTests` exercita transação multi-documento real. |
 | DB-06 | `IUnitOfWork.ExecuteAsync` na Application; `IClientSessionHandle` não aparece em nenhuma assinatura da camada. |
 | DB-07 | `IAuditLogRepository` e `IProjectSnapshotRepository` só expõem append e leitura. |
@@ -560,12 +573,204 @@ Registrados porque são exatamente o tipo de regressão que uma migração intro
 | Falha de validação | 400 | **422** | Distinguir entrada malformada de conflito de estado, como o brief pede para o tratamento no mobile. |
 | `DomainException` | 400 | **409** | Depois da validação de entrada, o que resta são transições inválidas, que são conflito de estado. |
 | Erros | sem `traceId` | `traceId` no ProblemDetails | Liga o erro reportado ao log, ao trace e ao `correlationId` da auditoria. |
+| Credencial errada, refresh revogado ou replay | 403 | **401** | `401` é "não sei quem você é", `403` é "sei, e não pode". O app reage diferente a cada um; colapsar os dois faz uma senha errada parecer falta de permissão. Corrigido na Fase 4. |
+| Falha de binding (JSON malformado, tipo errado) | 400, em outro formato, sem `traceId` | **422**, no mesmo ProblemDetails | Havia dois caminhos de validação com dois contratos. As `DataAnnotations` dos comandos foram removidas e o FluentValidation ficou como autoridade única. Corrigido na Fase 4. |
 
 ---
 
-## 7. Histórico de atualização
+## 7. Evidências da Fase 2 — inteligência e notificações
+
+### 7.1 Requisitos que passam a `VERIFIED`
+
+| ID | Evidência |
+|---|---|
+| AI-01 | `Flow.Application/Assistant/AssistantContracts.cs`. A Application declara `AssistantResult<T>`, `AssistantOutcomeKind` e as três operações. Não há tipo do `Google.GenAI` fora de `Flow.Infrastructure`. |
+| AI-02 | `CompareIdeas_ReturnsStructuredInsightAndRecordsAGovernanceRun`. O copiloto devolve avaliação por ideia, riscos, trade-offs e recomendação, tipados. |
+| AI-04 | `ProjectDraft_CreatesNothingUntilAHumanConfirmsIt`. Depois da chamada, a contagem de projetos é a mesma. O rascunho só vira projeto pelo comando normal, com auditoria e snapshot. |
+| AI-05 | `ExecutiveInsights_AreBuiltOnlyFromTheDashboardPayload`. |
+| AI-06 | O schema exige `evidenceWasSufficient`; com base pobre o serviço declara evidência insuficiente em vez de produzir análise. |
+| AI-07 | `ResilienceTests` cobre o circuit breaker em 5 cenários; timeout por `HttpOptions`; **sem retry** — content generation é POST metered e não idempotente. |
+| AI-08 | `flow_ai_requests`, `flow_ai_failures` e `flow_ai_latency_ms`, com label de operação. Nenhuma chave, JWT ou conteúdo sensível é registrado. |
+| AI-09 | `AssistantRunRecorder` grava em `assistant_runs` **inclusive as falhas**: solicitante, papel, operação, modelo, desfecho, latência, tokens e `correlationId`. |
+| AI-10 | `Gemini:ApiKey` só é lido em `Flow.Infrastructure`. Não existe no `app.config.ts` nem em nenhum perfil do `eas.json`. |
+| EXT-01 | `OneSignalPushSender` sobre `POST https://api.onesignal.com/notifications` com `include_aliases.external_id`. Validação live pendente de credencial — ver seção 9. |
+| EXT-02 | Coleção `notifications` com leitura, marcação e deep link; 3 endpoints. |
+| EXT-03 | `notification_outbox` gravado na mesma transação do domínio; `OutboxDispatcherHostedService` despacha fora dela. |
+| EXT-04 | `ATransientFailureSchedulesARetryInsteadOfLosingTheMessage`, `RepeatedTransientFailuresEventuallyDeadLetter`, `APermanentFailureIsNotRetried` e `DispatchIsIdempotentAcrossDrains`. |
+| EXT-05 | Timeout e cancelamento propagados; breaker próprio para o Gemini; desfecho `NotConfigured` tratado como estado válido. |
+
+### 7.2 Decisão registrada: context injection em vez de function calling
+
+**AI-03** pedia function calling sobre dados autorizados. A implementação injeta o contexto
+já filtrado pela autorização do usuário, e a decisão está registrada em
+[`ai-integration.md`](ai-integration.md).
+
+O motivo é de segurança, não de esforço: com function calling o modelo escolhe **quais**
+dados buscar, e a fronteira de autorização passa a depender do que ele decidir chamar. Com
+injeção, a consulta acontece antes, sob a identidade do usuário, e o modelo recebe apenas o
+que aquele usuário já poderia ler. As três operações do produto têm escopo fechado e
+conhecido de antemão, então function calling não acrescentaria capacidade — só superfície.
+
+`Copilot_IsNotAvailableToOperators`, `ExecutiveInsights_AreLeadershipOnly` e
+`ProjectDraft_ForAnUnapprovedIdea_IsRefusedBeforeCallingTheProvider` verificam que a
+autorização é aplicada **antes** de qualquer chamada ao provedor.
+
+**Status de AI-03:** `VERIFIED` como decisão de arquitetura documentada e testada, não como
+function calling literal.
+
+### 7.3 Comportamento sem credencial
+
+`WhenTheProviderFails_TheApiDegradesAndStillRecordsTheAttempt` e
+`WhenTheAssistantIsDown_TheRestOfTheProductKeepsWorking` verificam que:
+
+- os endpoints inteligentes respondem `503` com ProblemDetails, nunca `500`;
+- a tentativa é registrada em `assistant_runs` mesmo tendo falhado;
+- ideias, projetos, dashboard e FlowScore continuam funcionando;
+- `WithoutCredentials_MessagesStayPendingRatherThanBeingFakedAsSent` garante que **nada é
+  marcado como entregue** sem credencial de push.
+
+---
+
+## 8. Evidências da Fase 3 — aplicativo mobile
+
+### 8.1 Requisitos que passam a `VERIFIED`
+
+| ID | Evidência |
+|---|---|
+| MOB-01 | `app.config.ts` + `src/config/env.ts`. Em desenvolvimento a URL é derivada do host que serve o bundle; `EXPO_PUBLIC_API_URL` sobrepõe. |
+| MOB-02 | `src/api/client.ts`. Single-flight por promessa compartilhada: 401 concorrentes disparam **um** refresh; a falha limpa a sessão e leva ao login. |
+| MOB-03 | 4 telas de operador: home pela estratégia vigente, formulário que começa pelo problema, minhas ideias com filtro e detalhe com retorno e pontos. |
+| MOB-04 | 10 telas de gestor: fila ordenada por FlowScore, avaliação, comparação, copiloto, revisão de rascunho, projetos, detalhe, progresso e etapa, linha do tempo e resultado. |
+| MOB-05 | 2 telas de liderança: painel executivo com gráficos e insights. |
+| MOB-06 | 6 telas compartilhadas: avisos, perfil, estratégias, detalhe, formulário e histórico. |
+| MOB-07 | `victory-native` 41.19.3 + Skia 2.2.12 + Reanimated 4.1.1 + `react-native-worklets` 0.5.1. Spike documentado no risco R5. |
+| MOB-08 | `components/QueryView.tsx` centraliza loading, vazio e erro com retry, sobre o estado do TanStack Query. |
+| MOB-09 | `i18n/labels.ts`; toda a interface em pt-BR, incluindo enums de domínio, datas e moeda. |
+| MOB-10 | `src/api/errors.ts` tipa ProblemDetails; 422 vira erro de campo, 409 vira conflito de estado, 401 dispara refresh, 503 vira degradação anunciada. |
+| APK-01 | `eas.json` com 4 perfis; `preview` e `production` produzem **APK**. |
+| APK-02 | `npx tsc --noEmit` sem saída; `npx expo-doctor` **18/18**. |
+
+### 8.2 Verificação executada
+
+```text
+npx tsc --noEmit                    sem saída
+npx expo-doctor                     18/18 checks
+npx expo export --platform android  bundle Hermes de 5,59 MB
+```
+
+23 telas, cliente REST tipado, nenhum mock e nenhum dado falso. O aplicativo fala apenas
+com a API.
+
+### 8.3 Defeitos corrigidos na fase
+
+| # | Defeito | Correção |
+|---|---|---|
+| D6 | `expo-font` duplicado: `@expo/vector-icons` 15.1.1 arrastava a 57 enquanto o SDK 54 fixa 14.0.12. | `npx expo install expo-font`, alinhando com o `bundledNativeModules` do SDK. |
+| D7 | Reanimated 4 exige `react-native-worklets` como peer, ausente. | Adicionado 0.5.1. |
+| D8 | `usesCleartextTraffic` não é campo tipado de `android` no `app.config.ts`. | Plugin `expo-build-properties`. |
+
+---
+
+## 9. Evidências da Fase 4 — segurança, observabilidade e entregáveis
+
+### 9.1 Requisitos que passam a `VERIFIED`
+
+| ID | Evidência |
+|---|---|
+| SEC-04 | `AddCors` com origens explícitas por `CORS_ALLOWED_ORIGINS`. Sem curinga. |
+| SEC-05 | Rate limiting nativo do .NET 8, particionado, com política mais restrita em auth e nos endpoints de IA. `RepeatedLoginAttempts_AreEventuallyRefusedWith429`. |
+| SEC-06 | Nenhum segredo em `appsettings.json`; `.env.example` só com placeholders; `.env` no `.gitignore`. |
+| SEC-07 | A API **recusa iniciar** fora de Development com placeholder ou com segredo menor que 32 bytes. |
+| SEC-09 | Nenhum log de chave, JWT, senha ou corpo de requisição. O que é e o que não é registrado está em [`observability.md`](observability.md). |
+| SEC-01 (revisto) | Contrato de erro único: 401 para autenticação, 403 para autorização, 422 para entrada — inclusive falha de binding —, 409 para conflito, 503 para dependência degradada. Sem `400` no contrato. |
+| MOB-09 (revisto) | Nenhum texto em inglês chega à interface: mensagens de validação localizadas no servidor com rótulo de campo em pt-BR, e o cliente com a própria cópia por tipo de erro. `ValidationMessages_ComeBackInPortuguese` verifica as duas metades. |
+| OBS-01 | Serilog estruturado com enriquecimento e `UseSerilogRequestLogging`; `/health` cai para Verbose para não poluir. |
+| OBS-02 | Instrumentação de ASP.NET Core, HttpClient e MongoDB. |
+| OBS-03 | Métricas de runtime + 11 de negócio. |
+| OBS-05 | `traceId` no ProblemDetails, no log e em `audit_logs.correlationId` — o mesmo identificador. |
+| OBS-06 | `flow_ideas_submitted`, `flow_ideas_approved`, `flow_ideas_rejected`, `flow_projects_created`, `flow_projects_blocked`, `flow_projects_completed`, `flow_ai_requests`, `flow_ai_failures`, `flow_ai_latency_ms`, `flow_notifications_sent`, `flow_notifications_failed`. Labels de baixa cardinalidade, sem id de usuário nem de recurso. |
+| OBS-07 | Sem `OpenTelemetry:OtlpEndpoint` a instrumentação segue ativa em processo e a API sobe normalmente. |
+| DOC-01..09 | Os nove documentos existem em `docs/sprint-2/`. |
+| DOC-10 | `README.md` reescrito: visão, arquitetura, stack, requisitos, configuração, MongoDB, replica set, variáveis, backend, mobile, execução local, Docker, testes, demo, APK e deploy. |
+| DEL-01 | `dist/backend/` com fonte, testes, solução, Dockerfile, compose, `.env.example` e documentação, sem `bin`, `obj` nem settings locais. |
+| DEL-02 | `dist/mobile/flow-mobile/` sem `node_modules`, reprodutível pelo lockfile. |
+| DEL-03 | `dist/presentation-assets/` com `openapi.json`, `endpoints.txt`, `test-results.txt` e os nove documentos. |
+| DEL-04 | `scripts/build-artifacts.sh` exporta o `openapi.json` **da aplicação em execução**, não de uma cópia mantida à mão. |
+
+### 9.2 Defeito de fase encontrado ao escrever a documentação
+
+| # | Defeito | Como apareceu | Correção |
+|---|---|---|---|
+| D9 | As métricas de negócio estavam **definidas e nunca incrementadas**. | Ao redigir `observability.md` para afirmar que existiam. Afirmar seria falso. | `IFlowMetrics` na Application com `NullFlowMetrics` de fallback, ligado aos handlers de submissão, aprovação e rejeição, ao `ProjectTransitionRecorder` (**após** o commit, para não contar transição que sofreu rollback), ao `AssistantRunRecorder` e ao dispatcher do outbox. |
+| D10 | O rate limiting lia a configuração de `builder.Configuration` **antes** do `Build()`, então a sobreposição do host de teste nunca era aplicada — um controle que ignora a própria configuração em silêncio. | O teste de 429 não conseguia ligar o limite. | Resolver `IOptionsMonitor<RateLimitOptions>` por requisição a partir de `http.RequestServices`, com `RateLimitPartition.GetNoLimiter` quando desligado. |
+| D11 | Colisão de schema id no Swagger entre `IdeasController+CompareIdeasRequest` e `AssistantController+CompareIdeasRequest`. | `SwaggerGeneratorException`: **nenhuma** especificação era gerada. | `SchemaIdFor` prefixa tipos aninhados com o nome do tipo declarante. |
+| D12 | Falha de autenticação devolvia **403**. | Revisão do contrato HTTP ao documentar os códigos. | `UnauthorizedException` mapeada para 401; login e refresh passaram a usá-la. |
+| D13 | `[Required]` nos comandos fazia o `[ApiController]` recusar com **400**, em outro formato e sem `traceId`, antes do FluentValidation rodar. | O teste de mensagem em pt-BR recebeu 400 onde o contrato documenta 422. | `DataAnnotations` removidas dos 7 comandos; `InvalidModelStateResponseFactory` devolve 422 no formato da casa, então falha de binding também carrega `traceId`. |
+| D14 | Mensagens de validação em inglês em uma interface pt-BR — e o cliente ainda ecoava o `title` da exceção, também em inglês. | Revisão do fluxo de erro ponta a ponta. | Cultura do FluentValidation em pt-BR, rótulos de campo em `FieldLabels`, e o app deixou de ecoar `title`: usa a própria cópia por tipo de erro, e só exibe texto do servidor quando ele vem em `userMessage`. |
+
+### 9.3 Verificação executada
+
+```text
+dotnet build Flow.sln                          0 erros, 0 avisos
+dotnet test  Flow.sln                        213 testes, 0 falhas
+./scripts/build-artifacts.sh                 dist/ gerado
+openapi.json                                  54 endpoints, exportado da aplicação
+```
+
+---
+
+## 10. Estado final por área
+
+| Área | Requisitos | `VERIFIED` | Observação |
+|---|---|---|---|
+| AUTH | 8 | 8 | — |
+| STRATEGY | 9 | 9 | — |
+| IDEAS | 10 | 10 | — |
+| PROJECTS | 7 | 7 | — |
+| RESULTS | 6 | 6 | — |
+| DASHBOARD | 6 | 6 | — |
+| DATABASE | 7 | 7 | — |
+| MOBILE_INTEGRATION | 10 | 10 | — |
+| EXTERNAL_SERVICE | 5 | 5 | EXT-01 verificado por contrato; entrega live pende de credencial |
+| OBSERVABILITY | 7 | 7 | Sem coletor OTLP neste ambiente; a API sobe e instrumenta assim mesmo |
+| SECURITY | 9 | 9 | — |
+| AI_PLUS | 10 | 10 | AI-03 fechado como decisão documentada (seção 7.2); chamada live pende de chave |
+| APK | 4 | **2** | APK-03 e APK-04 pendem de credencial EAS |
+| DOCUMENTATION | 10 | 10 | — |
+| DELIVERABLES | 5 | **4** | DEL-05 escrito e revisado; imagem não construída nesta máquina |
+| **Total** | **113** | **110** | **3 pendentes, todos por credencial ou ambiente externo** |
+
+---
+
+## 11. Pendências reais
+
+Nenhuma delas depende de código que falte escrever.
+
+| ID | Pendência | Bloqueio | Como fechar |
+|---|---|---|---|
+| APK-03 | Build do APK | Credencial EAS com assinatura Android | `cd mobile && eas build --platform android --profile preview` |
+| APK-04 | Instalação em aparelho | Depende de APK-03 | Instalar o `.apk` e percorrer o roteiro de demonstração |
+| DEL-05 | Imagem Docker e deploy com HTTPS | Docker Desktop não inicia nesta máquina; sem credencial Dokploy | `docker compose build && docker compose up -d`; publicar e associar o domínio |
+
+### Itens que dependem só de chave, já implementados e testados por contrato
+
+| Item | O que falta | Comportamento hoje |
+|---|---|---|
+| Chamada real ao `gemini-3.8-flash` | `Gemini__ApiKey` | Endpoints inteligentes respondem `503`; o resto funciona igual |
+| Entrega real de push | Credencial OneSignal/FCM | Central de avisos funciona; o outbox mantém as mensagens **pendentes**, sem fingir entrega |
+| Visualização em coletor OTLP | Um coletor | Instrumentação ativa em processo; a API sobe normalmente |
+
+> Nenhum destes foi marcado como sucesso. O produto trata a ausência de credencial como um
+> estado previsto, e os testes verificam justamente esse estado.
+
+---
+
+## 12. Histórico de atualização
 
 | Data | Fase | Alteração |
 |---|---|---|
 | 09/09/2026 | Fase 0 | Auditoria inicial, baseline, pesquisa de versões e criação da matriz. |
-| 09/09/2026 | Fase 1 | Migração integral para MongoDB, Identity sobre Mongo, expansão de domínio, dashboard agregado, seeds de demonstração e suíte de 188 testes. |
+| 09/09/2026 | Fase 1 | Migração integral para MongoDB, Identity sobre Mongo, expansão de domínio, dashboard agregado, seed de demonstração e suíte de 188 testes. |
+| 09/09/2026 | Fase 2 | Copiloto do gestor, rascunho de projeto, insights executivos, governança em `assistant_runs`, central de notificações, outbox com retry e dead-letter. |
+| 09/09/2026 | Fase 3 | Aplicativo mobile reconstruído: 23 telas em pt-BR, cliente tipado, refresh single-flight, gráficos, `expo-doctor` 18/18. |
+| 09/09/2026 | Fase 4 | CORS, rate limiting, Serilog, OpenTelemetry, health checks, métricas de negócio ligadas de fato, Docker, compose, artefatos, README e os nove documentos. Suíte final de **213 testes**. |

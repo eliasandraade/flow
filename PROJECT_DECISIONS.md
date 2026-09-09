@@ -81,8 +81,8 @@ Rules:
 | Tenancy | Single organization | MVP does not require tenant isolation |
 | Architecture | Modular monolith with Clean Architecture | Fast delivery, clear boundaries, decomposable later |
 | Backend | ASP.NET Core 8 / C# | Strong domain modeling and enterprise ecosystem |
-| ORM | Entity Framework Core 8 | Native fit with ASP.NET Core and SQL Server |
-| Database | Azure SQL Database | Relational integrity and Azure alignment |
+| Data access | `MongoDB.Driver` 3.11.1, official driver | Document model fits the read patterns; no EF provider over Mongo |
+| Database | MongoDB 8.0, **replica set required** | Multi-document transactions are what keep aggregate, audit and snapshot atomic |
 | Mobile | React Native with Expo | Cross-platform primary client |
 | Web | React + Vite | Leadership dashboard only in MVP |
 | Authentication | ASP.NET Core Identity + JWT | Email/password first with future SSO seam |
@@ -93,11 +93,29 @@ Rules:
 | Dashboard | Conversion, completion time, ROI, status distribution, blockers | Leadership visibility and bottleneck detection |
 | Gamification | Points ledger with entity reference and reason | Traceable recognition mechanism |
 | Blocked state | Reachable from Planned and InProgress | Models pre-execution and execution blockers |
-| Cloud | Azure | Aligns with the backend and enterprise stack |
+| Deploy | Docker image behind Traefik, on Dokploy | Portable, no cloud lock-in, TLS terminated by the proxy |
 | Scale | 1,000+ users, single organization | Sufficient for MVP query and indexing design |
 | Direct DB writes | Forbidden for audited business entities | Prevents bypassing domain rules and audit history |
 | Snapshot schema | Versioned | Enables future interpretation of historical snapshots |
 | Blockers | First-class dashboard KPI | Bottleneck visibility is a product differentiator |
+
+---
+
+## Sprint 2 Amendments
+
+Decisions above that Sprint 2 changed, with the reasoning recorded so the history stays
+readable. Full context in [`docs/sprint-2/architecture.md`](docs/sprint-2/architecture.md).
+
+| Decision | Was | Is | Why it changed |
+|---|---|---|---|
+| Persistence | EF Core 8 over Azure SQL | `MongoDB.Driver` over MongoDB 8.0 | Sprint 2 requirement. The read patterns are document-shaped; the audit guarantees are preserved by explicit multi-document transactions rather than by change tracking. |
+| Identity stores | `AddEntityFrameworkStores` | Six Identity contracts implemented in-project over Mongo | No maintained first-party Mongo store exists; adopting an unmaintained community package would be a larger risk than owning the six interfaces the product actually uses. |
+| Deploy target | Azure | Docker image behind Traefik on Dokploy | Portability, and no dependency on a specific cloud for the delivery. |
+| Background schedulers | Explicit non-goal | One `HostedService` for the notification outbox | Push delivery must not decide whether a domain write commits. The worker drains the outbox outside the domain transaction. |
+| Intelligent features | Out of scope | Manager copilot, project draft and executive insights over Gemini | Sprint 2 requirement. The assistant advises and never decides: every run is recorded, and nothing it produces is persisted without a human confirming it. |
+
+The non-goals that still hold: multi-tenancy, microservices, active Redis caching, active
+SignalR, wired Azure AD SSO, ERP integration, file attachments and email notifications.
 
 ---
 
