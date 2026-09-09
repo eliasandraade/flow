@@ -711,11 +711,32 @@ com a API.
 ### 9.3 Verificação executada
 
 ```text
-dotnet build Flow.sln                          0 erros, 0 avisos
+dotnet build Flow.sln -c Release               0 erros, 0 avisos
 dotnet test  Flow.sln                        213 testes, 0 falhas
 ./scripts/build-artifacts.sh                 dist/ gerado
-openapi.json                                  54 endpoints, exportado da aplicação
+openapi.json                                  54 endpoints, 73 schemas, exportado da aplicação
+npx tsc --noEmit                              sem saída
+npx expo-doctor                               18/18
 ```
+
+### 9.4 Fumaça ponta a ponta contra a aplicação em Release
+
+Executada com a API publicada em Release, contra o MongoDB 8.0.30 em replica set, com o
+dataset de demonstração semeado. Não é o mesmo que a suíte: aqui é o binário de entrega
+respondendo a HTTP de verdade.
+
+| Verificação | Resultado |
+|---|---|
+| `GET /health/live` | `Healthy` |
+| `GET /health/ready` | `Healthy`, com o check `mongodb` em ~42 ms |
+| Seed de demonstração | 4 usuários, 10 ideias, 6 projetos, idempotente |
+| Login da liderança | 200, token emitido |
+| `GET /dashboard/summary` | 200 com KPI real: 80% de aprovação, 100% de conversão, 91,5 dias de conclusão média, 23 dias bloqueado, índice de gargalo 50 |
+| Senha errada | **401** |
+| Operador em endpoint de liderança | **403** |
+| Título vazio | **422**, `errors.Title` = `'título' deve ser informado.`, com `traceId` |
+| `POST /dashboard/insights` sem chave | **503** com `userMessage` em pt-BR, e o resto da API intacto |
+| Acentuação ponta a ponta | Gravada e lida sem perda: `Manutenção preditiva na célula de solda` |
 
 ---
 
