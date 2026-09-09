@@ -1,101 +1,199 @@
-import React from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '../../api/client';
-import { IdeaSummary } from '../../types/api';
+import React, { useCallback, useState } from 'react';
+import { FlatList, StyleSheet, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useIdeas } from '../../api/queries';
+import { Button, Chip, ChipRow, Screen, Txt } from '../../components/primitives';
+import { EmptyState, ErrorState, SkeletonList } from '../../components/feedback';
+import { useRefreshControl } from '../../components/QueryView';
+import { IdeaCard } from '../../components/domain';
+import { ideaStatusLabel } from '../../i18n/labels';
 import { theme } from '../../theme';
-import { normalizeStatus } from '../../utils/normalizeStatus';
-import { Card } from '../../components/Card';
-import { ScreenContainer } from '../../components/ScreenContainer';
-import { StatusBadge } from '../../components/StatusBadge';
+import type { IdeaStatus, IdeaSummary } from '../../api/types';
+import type { ManagerIdeasStackParams } from '../../navigation/types';
 
-export function IdeaQueueScreen({ navigation }: any) {
-  const { data: ideas, isLoading, isFetching, error, refetch } = useQuery<IdeaSummary[]>({
-    queryKey: ['ideas', 'all'],
-    queryFn: () => apiFetch<IdeaSummary[]>('/ideas'),
+type Nav = NativeStackNavigationProp<ManagerIdeasStackParams>;
+type Sort = 'flowScore' | 'score' | 'priority' | 'createdAt';
+
+const STATUSES: (IdeaStatus | null)[] = [null, 'UnderReview', 'Approved', 'Rejected', 'Draft'];
+
+const SORT_LABEL: Record<Sort, string> = {
+  flowScore: 'FlowScore',
+  score: 'Nota',
+  priority: 'Prioridade',
+  createdAt: 'Mais recentes',
+};
+
+const MAX_COMPARE = 5;
+
+/**
+ * The manager's review queue.
+ *
+ * Defaults to ideas awaiting a decision, sorted by FlowScore, because that is the question
+ * the screen exists to answer: what should I look at first.
+ */
+export function IdeaQueueScreen() {
+  const navigation = useNavigation<Nav>();
+
+  const [status, setStatus] = useState<IdeaStatus | null>('UnderReview');
+  const [sortBy, setSortBy] = useState<Sort>('flowScore');
+  const [selection, setSelection] = useState<string[]>([]);
+
+  const query = useIdeas({
+    status: status ?? undefined,
+    sortBy: sortBy === 'createdAt' ? undefined : sortBy,
+    take: 100,
   });
 
-  if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
-  }
-  if (error) {
-    return <Text style={styles.errorText}>{(error as Error).message}</Text>;
+  const refreshControl = useRefreshControl(query);
+  const selecting = selection.length > 0;
+
+  const toggleSelection = useCallback((id: string) => {
+    setSelection((current) => {
+      if (current.includes(id)) return current.filter((value) => value !== id);
+      if (current.length >= MAX_COMPARE) return current;
+      return [...current, id];
+    });
+  }, []);
+
+  const renderItem = useCallback(
+    ({ item }: { item: IdeaSummary }) => (
+      <IdeaCard
+        idea={item}
+        selected={selection.includes(item.id)}
+        onPress={() => {
+          if (selecting) toggleSelection(item.id);
+          else navigation.navigate('ManagerIdeaDetail', { ideaId: item.id });
+        }}
+      />
+    ),
+    [navigation, selecting, selection, toggleSelection]
+  );
+
+  if (query.isPending) {
+    return (
+      <Screen>
+        <SkeletonList count={5} />
+      </Screen>
+    );
   }
 
-  const pending = (ideas ?? []).filter((i) => i.status === 'UnderReview');
-  const rest    = (ideas ?? []).filter((i) => i.status !== 'UnderReview');
-  const sorted  = [...pending, ...rest];
+  if (query.isError) {
+    return (
+      <Screen>
+        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      </Screen>
+    );
+  }
 
   return (
-    <ScreenContainer>
+    <Screen padded={false}>
+      <View style={styles.filters}>
+        <ChipRow>
+          {STATUSES.map((value) => (
+            <Chip
+              key={value ?? 'all'}
+              label={value ? ideaStatusLabel[value] : 'Todas'}
+              selected={status === value}
+              onPress={() => setStatus(value)}
+            />
+          ))}
+        </ChipRow>
+
+        <ChipRow>
+          {(Object.keys(SORT_LABEL) as Sort[]).map((value) => (
+            <Chip
+              key={value}
+              label={SORT_LABEL[value]}
+              selected={sortBy === value}
+              onPress={() => setSortBy(value)}
+            />
+          ))}
+        </ChipRow>
+      </View>
+
       <FlatList
-        data={sorted}
+        data={query.data}
         keyExtractor={(item) => item.id}
-        onRefresh={() => { refetch(); }}
-        refreshing={isFetching}
-        renderItem={({ item }) => (
-          <Card
-            onPress={() => navigation.navigate('ManagerIdeaDetail', { id: item.id })}
-            style={
-              item.status === 'UnderReview'
-                ? [styles.card, styles.cardHighlight]
-                : styles.card
-            }
-          >
-            <Text style={styles.cardTitle}>{item.title}</Text>
-            <Text style={styles.meta} numberOfLines={2}>{item.problem}</Text>
-            <View style={styles.cardFooter}>
-              <Text style={styles.priority}>{item.priority}</Text>
-              <StatusBadge status={normalizeStatus(item.status)} />
-            </View>
-          </Card>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>No ideas submitted yet.</Text>
+        renderItem={renderItem}
+        refreshControl={refreshControl}
+        contentContainerStyle={styles.list}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={9}
+        removeClippedSubviews
+        ListHeaderComponent={
+          !selecting && (query.data?.length ?? 0) > 1 ? (
+            <Button
+              title="Comparar ideias"
+              onPress={() => query.data && setSelection([query.data[0].id])}
+              variant="secondary"
+              compact
+              style={styles.compareCta}
+            />
+          ) : null
         }
-        contentContainerStyle={{ paddingTop: theme.spacing.lg, paddingBottom: theme.spacing.xl }}
-        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <EmptyState
+            icon="◔"
+            title={status === 'UnderReview' ? 'Fila vazia' : 'Nada aqui'}
+            message={
+              status === 'UnderReview'
+                ? 'Nenhuma ideia aguardando decisão. Bom sinal.'
+                : 'Nenhuma ideia nesta situação no momento.'
+            }
+          />
+        }
       />
-    </ScreenContainer>
+
+      {selecting ? (
+        <View style={styles.selectionBar}>
+          <View style={styles.flex}>
+            <Txt variant="label">
+              {selection.length === 1
+                ? 'Selecione ao menos mais uma ideia'
+                : `${selection.length} ideias selecionadas`}
+            </Txt>
+            <Txt variant="caption" color={theme.colors.text.muted}>
+              {`Toque para selecionar (máximo ${MAX_COMPARE})`}
+            </Txt>
+          </View>
+
+          <Button
+            title="Cancelar"
+            onPress={() => setSelection([])}
+            variant="ghost"
+            compact
+            fullWidth={false}
+          />
+          <Button
+            title="Comparar"
+            onPress={() => navigation.navigate('IdeaCompare', { ideaIds: selection })}
+            compact
+            fullWidth={false}
+            disabled={selection.length < 2}
+          />
+        </View>
+      ) : null}
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { marginBottom: theme.spacing.md },
-  cardHighlight: {
-    borderColor: theme.colors.status.underReview.border,
-    backgroundColor: theme.colors.status.underReview.bg,
-  },
-  cardTitle: {
-    ...theme.typography.title,
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.xs,
-  },
-  meta: {
-    ...theme.typography.label,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing.sm,
-  },
-  cardFooter: {
+  flex: { flex: 1 },
+  filters: { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.sm, gap: theme.spacing.xxs },
+  list: { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.xxxl, flexGrow: 1 },
+  separator: { height: theme.spacing.md },
+  compareCta: { marginBottom: theme.spacing.md, alignSelf: 'flex-start' },
+  selectionBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  priority: {
-    ...theme.typography.caption,
-    color: theme.colors.text.muted,
-  },
-  emptyText: {
-    ...theme.typography.body,
-    color: theme.colors.text.muted,
-    textAlign: 'center',
-    marginTop: theme.spacing.xxxl,
-  },
-  errorText: {
-    ...theme.typography.body,
-    textAlign: 'center',
-    color: theme.colors.status.rejected.text,
-    marginTop: theme.spacing.xxxl,
-    padding: theme.spacing.lg,
+    gap: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.surface.border,
+    backgroundColor: theme.colors.surface.card,
   },
 });

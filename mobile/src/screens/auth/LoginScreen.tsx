@@ -1,110 +1,194 @@
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
-import { API_BASE } from '../../api/client';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/authStore';
-import { AuthResult } from '../../types/api';
+import { Button, Field, Txt } from '../../components/primitives';
+import { ErrorBanner } from '../../components/feedback';
+import { toApiError, type ApiError } from '../../api/errors';
 import { theme } from '../../theme';
-import { Button } from '../../components/Button';
-import { FormInput } from '../../components/FormInput';
-import { ScreenContainer } from '../../components/ScreenContainer';
+import { config } from '../../config/env';
+
+type Mode = 'login' | 'register';
 
 export function LoginScreen() {
+  const signIn = useAuthStore((state) => state.signIn);
+  const register = useAuthStore((state) => state.register);
+
+  const [mode, setMode] = useState<Mode>('login');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const setSession = useAuthStore((s) => s.setSession);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
 
-  async function handleLogin() {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Validation', 'Email and password are required.');
-      return;
-    }
-    setLoading(true);
+  const isRegister = mode === 'register';
+
+  async function submit() {
+    setError(null);
+    setSubmitting(true);
+
     try {
-      const response = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body?.detail ?? body?.title ?? 'Invalid credentials');
+      if (isRegister) {
+        await register(name.trim(), email.trim(), password);
+      } else {
+        await signIn(email.trim(), password);
       }
-      const data: AuthResult = await response.json();
-      await SecureStore.setItemAsync('accessToken', data.accessToken);
-      await SecureStore.setItemAsync('refreshToken', data.refreshToken);
-      await SecureStore.setItemAsync('userId', data.userId);
-      await SecureStore.setItemAsync('name', data.name);
-      await SecureStore.setItemAsync('email', data.email);
-      await SecureStore.setItemAsync('role', data.role);
-      setSession({
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
-        userId: data.userId,
-        name: data.name,
-        email: data.email,
-        role: data.role,
-      });
-    } catch (err: any) {
-      Alert.alert('Login Failed', err.message ?? 'Unknown error');
+    } catch (caught) {
+      setError(toApiError(caught));
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
+  function switchMode() {
+    setMode(isRegister ? 'login' : 'register');
+    setError(null);
+    setPassword('');
+  }
+
+  const canSubmit =
+    email.trim().length > 0 && password.length > 0 && (!isRegister || name.trim().length > 0);
+
   return (
-    <ScreenContainer>
-      <View style={styles.inner}>
-        <Text style={styles.title}>Flow</Text>
-        <Text style={styles.subtitle}>Innovation Management</Text>
-        <View style={styles.form}>
-          <FormInput
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-          <FormInput
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            placeholder="••••••••"
-            secureTextEntry
-          />
-          <Button
-            variant="primary"
-            size="lg"
-            label="Sign In"
-            onPress={handleLogin}
-            loading={loading}
-            style={styles.button}
-          />
-        </View>
-      </View>
-    </ScreenContainer>
+    <SafeAreaView style={styles.screen}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.brand}>
+            <View style={styles.logo}>
+              <Txt variant="heading" color={theme.colors.text.inverse}>
+                F
+              </Txt>
+            </View>
+            <Txt variant="display" style={styles.brandName}>
+              Flow
+            </Txt>
+            <Txt variant="body" color={theme.colors.text.secondary} align="center">
+              Da ideia ao resultado, com rastreabilidade.
+            </Txt>
+          </View>
+
+          <View style={styles.form}>
+            <Txt variant="subheading" style={styles.formTitle}>
+              {isRegister ? 'Criar conta' : 'Entrar'}
+            </Txt>
+
+            {error ? <ErrorBanner message={error.message} onDismiss={() => setError(null)} /> : null}
+
+            {isRegister ? (
+              <Field
+                label="Nome"
+                value={name}
+                onChangeText={setName}
+                placeholder="Seu nome completo"
+                autoCapitalize="words"
+                autoComplete="name"
+                required
+                error={error?.fieldError('Name')}
+              />
+            ) : null}
+
+            <Field
+              label="E-mail"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="voce@empresa.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              required
+              error={error?.fieldError('Email')}
+            />
+
+            <Field
+              label="Senha"
+              value={password}
+              onChangeText={setPassword}
+              placeholder={isRegister ? 'Mínimo de 8 caracteres' : 'Sua senha'}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
+              required
+              error={error?.fieldError('Password') ?? error?.fieldError('PasswordTooShort')}
+              hint={isRegister ? 'Use ao menos 8 caracteres, com um número.' : undefined}
+              onSubmitEditing={canSubmit ? submit : undefined}
+              returnKeyType="go"
+            />
+
+            <Button
+              title={isRegister ? 'Criar conta' : 'Entrar'}
+              onPress={submit}
+              loading={submitting}
+              disabled={!canSubmit}
+            />
+
+            <Pressable
+              onPress={switchMode}
+              hitSlop={theme.hitSlop}
+              style={styles.switchMode}
+              accessibilityRole="button"
+            >
+              <Txt variant="body" color={theme.colors.text.brand} align="center">
+                {isRegister ? 'Já tenho conta. Entrar' : 'Não tenho conta. Criar agora'}
+              </Txt>
+            </Pressable>
+
+            {isRegister ? (
+              <Txt variant="caption" color={theme.colors.text.muted} align="center" style={styles.roleNote}>
+                Novas contas entram como Operador. Perfis de gestão são concedidos pela
+                administração.
+              </Txt>
+            ) : null}
+          </View>
+
+          {!config.isProduction ? (
+            <Txt variant="caption" color={theme.colors.text.muted} align="center" style={styles.envNote}>
+              {`${config.environment} · ${config.apiBaseUrl}`}
+            </Txt>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  inner: {
-    flex: 1,
+  flex: { flex: 1 },
+  screen: { flex: 1, backgroundColor: theme.colors.surface.background },
+  content: {
+    flexGrow: 1,
     justifyContent: 'center',
+    padding: theme.spacing.xl,
   },
-  title: {
-    ...theme.typography.display,
-    color: theme.colors.text.primary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.xs,
+  brand: { alignItems: 'center', marginBottom: theme.spacing.xxl },
+  logo: {
+    width: 64,
+    height: 64,
+    borderRadius: theme.radius.xl,
+    backgroundColor: theme.colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.lg,
+    ...theme.elevation.raised,
   },
-  subtitle: {
-    ...theme.typography.body,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.xxl,
+  brandName: { marginBottom: theme.spacing.xs },
+  form: {
+    backgroundColor: theme.colors.surface.card,
+    borderRadius: theme.radius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.surface.border,
+    padding: theme.spacing.xl,
+    ...theme.elevation.card,
   },
-  form: { gap: theme.spacing.xs },
-  button: { marginTop: theme.spacing.sm },
+  formTitle: { marginBottom: theme.spacing.lg },
+  switchMode: { marginTop: theme.spacing.lg, minHeight: theme.minTouchTarget, justifyContent: 'center' },
+  roleNote: { marginTop: theme.spacing.sm },
+  envNote: { marginTop: theme.spacing.xl },
 });

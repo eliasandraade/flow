@@ -1,126 +1,230 @@
-import React from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../../api/client';
-import { IdeaDetail } from '../../types/api';
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useDeleteIdea, useIdea, useIdeaComments, useSubmitIdea } from '../../api/queries';
+import { Button, Card, Divider, Screen, SectionHeader, Txt } from '../../components/primitives';
+import { ConfirmDialog, ErrorBanner, ErrorState, SkeletonList, SuccessBanner } from '../../components/feedback';
+import { useRefreshControl } from '../../components/QueryView';
+import { FlowScoreCard, IdeaStatusBadge, PriorityBadge, StatusBadge } from '../../components/domain';
+import { formatDateTime, formatRelative } from '../../utils/format';
+import { toApiError } from '../../api/errors';
 import { theme } from '../../theme';
-import { normalizeStatus } from '../../utils/normalizeStatus';
-import { Button } from '../../components/Button';
-import { Card } from '../../components/Card';
-import { ScreenContainer } from '../../components/ScreenContainer';
-import { StatusBadge } from '../../components/StatusBadge';
+import type { OperatorStackParams } from '../../navigation/types';
 
-export function IdeaDetailScreen({ route }: any) {
-  const { id } = route.params as { id: string };
-  const queryClient = useQueryClient();
+type Nav = NativeStackNavigationProp<OperatorStackParams>;
 
-  const { data: idea, isLoading, error } = useQuery<IdeaDetail>({
-    queryKey: ['idea', id],
-    queryFn: () => apiFetch<IdeaDetail>(`/ideas/${id}`),
-  });
+export function IdeaDetailScreen() {
+  const navigation = useNavigation<Nav>();
+  const { ideaId } = useRoute<RouteProp<OperatorStackParams, 'IdeaDetail'>>().params;
 
-  async function handleSubmitForReview() {
+  const query = useIdea(ideaId);
+  const comments = useIdeaComments(ideaId);
+  const submit = useSubmitIdea();
+  const remove = useDeleteIdea();
+  const refreshControl = useRefreshControl(query);
+
+  const [confirming, setConfirming] = useState<'submit' | 'delete' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  if (query.isPending) {
+    return (
+      <Screen>
+        <SkeletonList count={3} />
+      </Screen>
+    );
+  }
+
+  if (query.isError) {
+    return (
+      <Screen>
+        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      </Screen>
+    );
+  }
+
+  const idea = query.data;
+
+  async function confirmAction() {
+    setError(null);
+    setSuccess(null);
+
     try {
-      await apiFetch(`/ideas/${id}/submit`, { method: 'POST' });
-      await queryClient.invalidateQueries({ queryKey: ['ideas'] });
-      await queryClient.invalidateQueries({ queryKey: ['idea', id] });
-      Alert.alert('Submitted', 'Your idea has been submitted for manager review.');
-    } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not submit idea');
+      if (confirming === 'submit') {
+        await submit.mutateAsync(ideaId);
+        setSuccess('Ideia enviada para análise. Você será avisado quando houver decisão.');
+        setConfirming(null);
+      } else if (confirming === 'delete') {
+        await remove.mutateAsync(ideaId);
+        setConfirming(null);
+        navigation.goBack();
+      }
+    } catch (caught) {
+      setError(toApiError(caught).message);
+      setConfirming(null);
     }
   }
 
-  if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
-  }
-  if (error || !idea) {
-    return <Text style={styles.errorText}>{(error as Error)?.message ?? 'Idea not found'}</Text>;
-  }
-
   return (
-    <ScreenContainer scrollable>
-      <Text style={styles.title}>{idea.title}</Text>
-      <View style={styles.metaRow}>
-        <StatusBadge status={normalizeStatus(idea.status)} />
-        <Text style={styles.priority}>{idea.priority}</Text>
-      </View>
+    <Screen scroll refreshControl={refreshControl}>
+      {error ? <ErrorBanner message={error} onDismiss={() => setError(null)} /> : null}
+      {success ? <SuccessBanner message={success} /> : null}
 
-      <Text style={styles.sectionLabel}>Problem</Text>
-      <Text style={styles.body}>{idea.problem}</Text>
+      <Card style={styles.first}>
+        <View style={styles.badges}>
+          <IdeaStatusBadge status={idea.status} />
+          <PriorityBadge priority={idea.priority} kind="idea" />
+        </View>
 
-      <Text style={styles.sectionLabel}>Description</Text>
-      <Text style={styles.body}>{idea.description}</Text>
+        <Txt variant="heading" style={styles.title}>
+          {idea.title}
+        </Txt>
+
+        <Txt variant="caption" color={theme.colors.text.muted}>
+          {`Criada ${formatRelative(idea.createdAt)}`}
+        </Txt>
+
+        <Divider />
+
+        <Txt variant="overline" color={theme.colors.text.muted}>
+          O problema
+        </Txt>
+        <Txt variant="body" color={theme.colors.text.secondary} style={styles.paragraph}>
+          {idea.problem}
+        </Txt>
+
+        <Txt variant="overline" color={theme.colors.text.muted} style={styles.blockGap}>
+          Como resolver
+        </Txt>
+        <Txt variant="body" color={theme.colors.text.secondary} style={styles.paragraph}>
+          {idea.description}
+        </Txt>
+
+        {idea.linkedGuidelineTitle ? (
+          <>
+            <Divider />
+            <Txt variant="overline" color={theme.colors.text.muted}>
+              Diretriz vinculada
+            </Txt>
+            <View style={styles.guidelineRow}>
+              <StatusBadge status="strategy" label={idea.linkedGuidelineTitle} />
+            </View>
+          </>
+        ) : null}
+      </Card>
 
       {idea.managerComment ? (
-        <View style={styles.commentSection}>
-          <Text style={styles.sectionLabel}>Manager Comment</Text>
-          <Card padding={theme.spacing.md}>
-            <Text style={styles.commentText}>{idea.managerComment}</Text>
-          </Card>
+        <Card
+          style={[
+            styles.decision,
+            {
+              backgroundColor:
+                idea.status === 'Approved'
+                  ? theme.colors.successSurface
+                  : theme.colors.dangerSurface,
+            },
+          ]}
+        >
+          <Txt variant="overline" color={theme.colors.text.muted}>
+            {idea.status === 'Approved' ? 'Retorno do gestor' : 'Por que não foi aprovada'}
+          </Txt>
+          <Txt variant="body" style={styles.paragraph}>
+            {idea.managerComment}
+          </Txt>
+        </Card>
+      ) : null}
+
+      {idea.flowScore ? (
+        <>
+          <SectionHeader
+            title="Como esta ideia foi avaliada"
+            subtitle="O FlowScore é calculado a partir de dimensões visíveis"
+          />
+          <FlowScoreCard score={idea.flowScore} />
+        </>
+      ) : null}
+
+      <SectionHeader title="Comentários" />
+
+      {comments.isPending ? (
+        <SkeletonList count={2} />
+      ) : comments.data && comments.data.length > 0 ? (
+        <View style={styles.comments}>
+          {comments.data.map((comment) => (
+            <Card key={comment.id}>
+              <View style={styles.commentHeader}>
+                <Txt variant="label">{comment.authorName}</Txt>
+                <Txt variant="caption" color={theme.colors.text.muted}>
+                  {formatDateTime(comment.createdAt)}
+                </Txt>
+              </View>
+              <Txt variant="body" color={theme.colors.text.secondary} style={styles.paragraph}>
+                {comment.body}
+              </Txt>
+            </Card>
+          ))}
+        </View>
+      ) : (
+        <Card>
+          <Txt variant="caption" color={theme.colors.text.secondary}>
+            Ainda não há comentários do gestor nesta ideia.
+          </Txt>
+        </Card>
+      )}
+
+      {idea.canEdit || idea.canDelete || idea.status === 'Draft' ? (
+        <View style={styles.actions}>
+          {idea.status === 'Draft' ? (
+            <Button title="Enviar para análise" onPress={() => setConfirming('submit')} />
+          ) : null}
+
+          {idea.canEdit ? (
+            <Button
+              title="Editar rascunho"
+              onPress={() => navigation.navigate('IdeaForm', { ideaId })}
+              variant="secondary"
+            />
+          ) : null}
+
+          {idea.canDelete ? (
+            <Button title="Excluir rascunho" onPress={() => setConfirming('delete')} variant="danger" />
+          ) : null}
         </View>
       ) : null}
 
-      <Text style={styles.timestamp}>
-        Created: {new Date(idea.createdAt).toLocaleDateString()}
-      </Text>
-
-      {idea.status === 'Draft' && (
-        <Button
-          variant="primary"
-          size="lg"
-          label="Submit for Review"
-          onPress={handleSubmitForReview}
-          style={styles.actionBtn}
-        />
-      )}
-    </ScreenContainer>
+      <ConfirmDialog
+        visible={confirming !== null}
+        title={confirming === 'submit' ? 'Enviar para análise' : 'Excluir rascunho'}
+        message={
+          confirming === 'submit'
+            ? 'Depois de enviada, a ideia não pode mais ser editada. O gestor será notificado.'
+            : 'Esta ação é permanente. O registro de que a ideia existiu permanece na auditoria.'
+        }
+        confirmLabel={confirming === 'submit' ? 'Enviar' : 'Excluir'}
+        destructive={confirming === 'delete'}
+        loading={submit.isPending || remove.isPending}
+        onConfirm={confirmAction}
+        onCancel={() => setConfirming(null)}
+      />
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  title: {
-    ...theme.typography.title,
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.sm,
-  },
-  metaRow: {
+  first: { marginTop: theme.spacing.lg },
+  badges: { flexDirection: 'row', gap: theme.spacing.sm, marginBottom: theme.spacing.md },
+  title: { marginBottom: theme.spacing.xs },
+  paragraph: { marginTop: theme.spacing.xs },
+  blockGap: { marginTop: theme.spacing.lg },
+  guidelineRow: { marginTop: theme.spacing.sm },
+  decision: { marginTop: theme.spacing.md },
+  comments: { gap: theme.spacing.md },
+  commentHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: theme.spacing.sm,
-    marginBottom: theme.spacing.xl,
   },
-  priority: {
-    ...theme.typography.label,
-    color: theme.colors.text.secondary,
-  },
-  sectionLabel: {
-    ...theme.typography.label,
-    color: theme.colors.text.secondary,
-    marginTop: theme.spacing.xl,
-    marginBottom: theme.spacing.xs,
-  },
-  body: {
-    ...theme.typography.body,
-    color: theme.colors.text.primary,
-    lineHeight: 22,
-  },
-  commentSection: { marginTop: theme.spacing.xl },
-  commentText: {
-    ...theme.typography.body,
-    color: theme.colors.text.primary,
-    lineHeight: 20,
-  },
-  timestamp: {
-    ...theme.typography.caption,
-    color: theme.colors.text.muted,
-    marginTop: theme.spacing.xl,
-  },
-  actionBtn: { marginTop: theme.spacing.xxl },
-  errorText: {
-    ...theme.typography.body,
-    textAlign: 'center',
-    color: theme.colors.status.rejected.text,
-    marginTop: theme.spacing.xxxl,
-    padding: theme.spacing.lg,
-  },
+  actions: { gap: theme.spacing.sm, marginTop: theme.spacing.xl },
 });

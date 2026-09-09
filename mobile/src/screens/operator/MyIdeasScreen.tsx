@@ -1,108 +1,110 @@
-import React from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch, logout } from '../../api/client';
-import { useAuthStore } from '../../store/authStore';
-import { IdeaSummary } from '../../types/api';
+import React, { useCallback, useState } from 'react';
+import { FlatList, StyleSheet, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useIdeas } from '../../api/queries';
+import { Button, Chip, ChipRow, Screen } from '../../components/primitives';
+import { EmptyState, ErrorState, SkeletonList } from '../../components/feedback';
+import { useRefreshControl } from '../../components/QueryView';
+import { IdeaCard } from '../../components/domain';
+import { ideaStatusLabel } from '../../i18n/labels';
 import { theme } from '../../theme';
-import { normalizeStatus } from '../../utils/normalizeStatus';
-import { Button } from '../../components/Button';
-import { Card } from '../../components/Card';
-import { ScreenContainer } from '../../components/ScreenContainer';
-import { StatusBadge } from '../../components/StatusBadge';
+import type { IdeaStatus, IdeaSummary } from '../../api/types';
+import type { OperatorStackParams } from '../../navigation/types';
 
-export function MyIdeasScreen({ navigation }: any) {
-  const session = useAuthStore((s) => s.session);
+type Nav = NativeStackNavigationProp<OperatorStackParams>;
 
-  const { data: ideas, isLoading, isFetching, error, refetch } = useQuery<IdeaSummary[]>({
-    queryKey: ['ideas'],
-    queryFn: () => apiFetch<IdeaSummary[]>('/ideas'),
-  });
+const FILTERS: (IdeaStatus | null)[] = [null, 'Draft', 'UnderReview', 'Approved', 'Rejected'];
 
-  if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
+export function MyIdeasScreen() {
+  const navigation = useNavigation<Nav>();
+  const [status, setStatus] = useState<IdeaStatus | null>(null);
+
+  // The server already scopes an Operator to their own ideas, so no author filter is sent.
+  const query = useIdeas({ status: status ?? undefined, take: 100 });
+  const refreshControl = useRefreshControl(query);
+
+  const renderItem = useCallback(
+    ({ item }: { item: IdeaSummary }) => (
+      <IdeaCard idea={item} onPress={() => navigation.navigate('IdeaDetail', { ideaId: item.id })} />
+    ),
+    [navigation]
+  );
+
+  if (query.isPending) {
+    return (
+      <Screen>
+        <SkeletonList count={5} />
+      </Screen>
+    );
   }
-  if (error) {
-    return <Text style={styles.errorText}>{(error as Error).message}</Text>;
+
+  if (query.isError) {
+    return (
+      <Screen>
+        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      </Screen>
+    );
   }
 
   return (
-    <ScreenContainer>
-      <Button
-        variant="primary"
-        label="+ New Idea"
-        onPress={() => navigation.navigate('SubmitIdea')}
-        style={styles.newButton}
-      />
+    <Screen padded={false}>
+      <View style={styles.filters}>
+        <ChipRow>
+          {FILTERS.map((value) => (
+            <Chip
+              key={value ?? 'all'}
+              label={value ? ideaStatusLabel[value] : 'Todas'}
+              selected={status === value}
+              onPress={() => setStatus(value)}
+            />
+          ))}
+        </ChipRow>
+      </View>
+
       <FlatList
-        data={ideas ?? []}
+        data={query.data}
         keyExtractor={(item) => item.id}
-        onRefresh={() => { refetch(); }}
-        refreshing={isFetching}
-        renderItem={({ item }) => (
-          <Card
-            onPress={() => navigation.navigate('IdeaDetail', { id: item.id })}
-            style={styles.card}
-          >
-            <Text style={styles.cardTitle}>{item.title}</Text>
-            <Text style={styles.meta} numberOfLines={2}>{item.problem}</Text>
-            <View style={styles.cardFooter}>
-              <Text style={styles.priority}>{item.priority}</Text>
-              <StatusBadge status={normalizeStatus(item.status)} />
-            </View>
-          </Card>
-        )}
+        renderItem={renderItem}
+        refreshControl={refreshControl}
+        contentContainerStyle={styles.list}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={9}
+        removeClippedSubviews
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No ideas yet. Tap "+ New Idea" to get started.</Text>
+          <EmptyState
+            icon="✎"
+            title={status ? 'Nada nesta situação' : 'Nenhuma ideia ainda'}
+            message={
+              status
+                ? 'Nenhuma das suas ideias está nesta situação no momento.'
+                : 'Um problema que te incomoda no dia a dia costuma ser a melhor primeira ideia.'
+            }
+            actionLabel={status ? undefined : 'Enviar primeira ideia'}
+            onAction={status ? undefined : () => navigation.navigate('IdeaForm')}
+          />
         }
-        contentContainerStyle={{ paddingBottom: theme.spacing.xl }}
-        showsVerticalScrollIndicator={false}
       />
-      <Button
-        variant="secondary"
-        label="Sign Out"
-        onPress={() => logout(session?.refreshToken ?? '')}
-        style={styles.logoutBtn}
-      />
-    </ScreenContainer>
+
+      <View style={styles.footer}>
+        <Button title="Nova ideia" onPress={() => navigation.navigate('IdeaForm')} />
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  newButton: { marginTop: theme.spacing.lg, marginBottom: theme.spacing.lg },
-  card: { marginBottom: theme.spacing.md },
-  cardTitle: {
-    ...theme.typography.title,
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.xs,
+  filters: { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.sm },
+  list: { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.lg, flexGrow: 1 },
+  separator: { height: theme.spacing.md },
+  footer: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
+    paddingBottom: theme.spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.surface.border,
+    backgroundColor: theme.colors.surface.card,
   },
-  meta: {
-    ...theme.typography.label,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing.sm,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  priority: {
-    ...theme.typography.caption,
-    color: theme.colors.text.muted,
-  },
-  emptyText: {
-    ...theme.typography.body,
-    color: theme.colors.text.muted,
-    textAlign: 'center',
-    marginTop: theme.spacing.xxxl,
-    lineHeight: 22,
-  },
-  errorText: {
-    ...theme.typography.body,
-    textAlign: 'center',
-    color: theme.colors.status.rejected.text,
-    marginTop: theme.spacing.xxxl,
-    padding: theme.spacing.lg,
-  },
-  logoutBtn: { marginTop: theme.spacing.sm, marginBottom: theme.spacing.lg },
 });

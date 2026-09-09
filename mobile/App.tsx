@@ -1,51 +1,46 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator } from 'react-native';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
+import { createQueryClient } from './src/api/queries';
+import { setSessionExpiredHandler } from './src/api/client';
 import { useAuthStore } from './src/store/authStore';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { LoadingScreen } from './src/components/feedback';
 import { theme } from './src/theme';
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
-});
+const queryClient = createQueryClient();
 
 export default function App() {
-  const { hydrated, setSession, setHydrated } = useAuthStore();
+  const hydrated = useAuthStore((state) => state.hydrated);
+  const hydrate = useAuthStore((state) => state.hydrate);
+  const clearSession = useAuthStore((state) => state.clearSession);
 
   useEffect(() => {
-    async function hydrate() {
-      try {
-        const accessToken = await SecureStore.getItemAsync('accessToken');
-        const userId = await SecureStore.getItemAsync('userId');
-        const role = await SecureStore.getItemAsync('role');
-        if (accessToken && userId && role) {
-          const refreshToken = await SecureStore.getItemAsync('refreshToken') ?? '';
-          const name = await SecureStore.getItemAsync('name') ?? '';
-          const email = await SecureStore.getItemAsync('email') ?? '';
-          setSession({ accessToken, refreshToken, userId, name, email, role: role as any });
-        }
-      } finally {
-        setHydrated();
-      }
-    }
-    hydrate();
-  }, []);
+    void hydrate();
+  }, [hydrate]);
 
-  if (!hydrated) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-      </View>
-    );
-  }
+  useEffect(() => {
+    // The API client owns the refresh flow; when it finally gives up, the app returns to
+    // the login screen and every cached query is discarded so no stale data leaks into the
+    // next session.
+    setSessionExpiredHandler(() => {
+      clearSession();
+      queryClient.clear();
+    });
+
+    return () => setSessionExpiredHandler(null);
+  }, [clearSession]);
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.surface.background }}>
       <SafeAreaProvider>
-        <AppNavigator />
+        <QueryClientProvider client={queryClient}>
+          <StatusBar style="dark" />
+          {hydrated ? <AppNavigator /> : <LoadingScreen label="Abrindo o Flow…" />}
+        </QueryClientProvider>
       </SafeAreaProvider>
-    </QueryClientProvider>
+    </GestureHandlerRootView>
   );
 }

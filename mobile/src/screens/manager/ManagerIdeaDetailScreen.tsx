@@ -1,183 +1,389 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../../api/client';
-import { IdeaDetail } from '../../types/api';
+import { StyleSheet, View } from 'react-native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import {
+  useAddIdeaComment,
+  useDecideIdea,
+  useIdea,
+  useIdeaComments,
+  useSetFlowScore,
+  useSetIdeaPriority,
+  useSetIdeaScore,
+} from '../../api/queries';
+import { Button, Card, Chip, ChipRow, Divider, Field, Screen, SectionHeader, Txt } from '../../components/primitives';
+import { ConfirmDialog, ErrorBanner, ErrorState, SkeletonList, SuccessBanner } from '../../components/feedback';
+import { useRefreshControl } from '../../components/QueryView';
+import { FlowScoreCard, IdeaStatusBadge, PriorityBadge, StatusBadge } from '../../components/domain';
+import { flowScoreDimensionLabel, ideaPriorityLabel } from '../../i18n/labels';
+import { formatDateTime, formatRelative } from '../../utils/format';
+import { toApiError } from '../../api/errors';
 import { theme } from '../../theme';
-import { normalizeStatus } from '../../utils/normalizeStatus';
-import { Button } from '../../components/Button';
-import { FormInput } from '../../components/FormInput';
-import { ScreenContainer } from '../../components/ScreenContainer';
-import { StatusBadge } from '../../components/StatusBadge';
+import type { IdeaPriority } from '../../api/types';
+import type { ManagerIdeasStackParams } from '../../navigation/types';
 
-export function ManagerIdeaDetailScreen({ route }: any) {
-  const { id } = route.params as { id: string };
-  const queryClient = useQueryClient();
-  const [comment, setComment] = useState('');
-  const [actionLoading, setActionLoading] = useState(false);
+type Nav = NativeStackNavigationProp<ManagerIdeasStackParams>;
+type Dimension = keyof typeof flowScoreDimensionLabel;
 
-  const { data: idea, isLoading, error } = useQuery<IdeaDetail>({
-    queryKey: ['idea', id],
-    queryFn: () => apiFetch<IdeaDetail>(`/ideas/${id}`),
+const DIMENSIONS: Dimension[] = [
+  'strategicAlignment',
+  'impact',
+  'feasibility',
+  'urgency',
+  'confidence',
+];
+
+export function ManagerIdeaDetailScreen() {
+  const navigation = useNavigation<Nav>();
+  const { ideaId } = useRoute<RouteProp<ManagerIdeasStackParams, 'ManagerIdeaDetail'>>().params;
+
+  const query = useIdea(ideaId);
+  const comments = useIdeaComments(ideaId);
+  const decide = useDecideIdea();
+  const setPriority = useSetIdeaPriority();
+  const setScore = useSetIdeaScore();
+  const setFlowScore = useSetFlowScore();
+  const addComment = useAddIdeaComment();
+  const refreshControl = useRefreshControl(query);
+
+  const [deciding, setDeciding] = useState<'approve' | 'reject' | null>(null);
+  const [decisionComment, setDecisionComment] = useState('');
+  const [commentBody, setCommentBody] = useState('');
+  const [scoreInput, setScoreInput] = useState('');
+  const [components, setComponents] = useState<Record<Dimension, number>>({
+    strategicAlignment: 5,
+    impact: 5,
+    feasibility: 5,
+    urgency: 5,
+    confidence: 5,
   });
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  async function invalidate() {
-    await queryClient.invalidateQueries({ queryKey: ['idea', id] });
-    await queryClient.invalidateQueries({ queryKey: ['ideas', 'all'] });
+  if (query.isPending) {
+    return (
+      <Screen>
+        <SkeletonList count={3} />
+      </Screen>
+    );
   }
 
-  async function handleApprove() {
-    setActionLoading(true);
+  if (query.isError) {
+    return (
+      <Screen>
+        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      </Screen>
+    );
+  }
+
+  const idea = query.data;
+  const pendingDecision = idea.status === 'UnderReview';
+
+  async function run(action: () => Promise<unknown>, message: string) {
+    setError(null);
+    setSuccess(null);
+
     try {
-      await apiFetch(`/ideas/${id}/approve`, {
-        method: 'POST',
-        body: JSON.stringify({ managerComment: comment.trim() || null }),
-      });
-      await invalidate();
-      Alert.alert('Approved', 'The idea has been approved.');
-    } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not approve idea');
-    } finally {
-      setActionLoading(false);
+      await action();
+      setSuccess(message);
+    } catch (caught) {
+      setError(toApiError(caught).message);
     }
   }
 
-  async function handleReject() {
-    if (!comment.trim()) {
-      Alert.alert('Validation', 'A rejection comment is required.');
-      return;
-    }
-    setActionLoading(true);
+  async function confirmDecision() {
+    if (!deciding) return;
+
+    setError(null);
+
     try {
-      await apiFetch(`/ideas/${id}/reject`, {
-        method: 'POST',
-        body: JSON.stringify({ managerComment: comment }),
-      });
-      await invalidate();
-      Alert.alert('Rejected', 'The idea has been rejected.');
-    } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not reject idea');
-    } finally {
-      setActionLoading(false);
+      await decide.mutateAsync({ id: ideaId, decision: deciding, comment: decisionComment.trim() });
+      setSuccess(
+        deciding === 'approve'
+          ? 'Ideia aprovada. O autor foi notificado e ganhou 50 pontos.'
+          : 'Ideia não aprovada. O autor foi notificado com a justificativa.'
+      );
+      setDeciding(null);
+      setDecisionComment('');
+    } catch (caught) {
+      setError(toApiError(caught).message);
+      setDeciding(null);
     }
   }
-
-  if (isLoading) {
-    return <ActivityIndicator style={{ flex: 1 }} size="large" color={theme.colors.primary} />;
-  }
-  if (error || !idea) {
-    return <Text style={styles.errorText}>{(error as Error)?.message ?? 'Not found'}</Text>;
-  }
-
-  const canAct = idea.status === 'UnderReview';
 
   return (
-    <ScreenContainer scrollable>
-      <Text style={styles.title}>{idea.title}</Text>
-      <View style={styles.metaRow}>
-        <StatusBadge status={normalizeStatus(idea.status)} />
-        <Text style={styles.priority}>{idea.priority}</Text>
-      </View>
+    <Screen scroll refreshControl={refreshControl}>
+      {error ? <ErrorBanner message={error} onDismiss={() => setError(null)} /> : null}
+      {success ? <SuccessBanner message={success} /> : null}
 
-      <Text style={styles.sectionLabel}>Problem</Text>
-      <Text style={styles.body}>{idea.problem}</Text>
+      <Card style={styles.first}>
+        <View style={styles.badges}>
+          <IdeaStatusBadge status={idea.status} />
+          <PriorityBadge priority={idea.priority} kind="idea" />
+        </View>
 
-      <Text style={styles.sectionLabel}>Description</Text>
-      <Text style={styles.body}>{idea.description}</Text>
+        <Txt variant="heading" style={styles.title}>
+          {idea.title}
+        </Txt>
 
-      {idea.managerComment ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Manager Comment</Text>
-          <Text style={styles.body}>{idea.managerComment}</Text>
+        <Txt variant="caption" color={theme.colors.text.muted}>
+          {`${idea.submittedByName} · ${formatRelative(idea.createdAt)}`}
+        </Txt>
+
+        <Divider />
+
+        <Txt variant="overline" color={theme.colors.text.muted}>
+          O problema
+        </Txt>
+        <Txt variant="body" color={theme.colors.text.secondary} style={styles.paragraph}>
+          {idea.problem}
+        </Txt>
+
+        <Txt variant="overline" color={theme.colors.text.muted} style={styles.blockGap}>
+          Como resolver
+        </Txt>
+        <Txt variant="body" color={theme.colors.text.secondary} style={styles.paragraph}>
+          {idea.description}
+        </Txt>
+
+        {idea.linkedGuidelineTitle ? (
+          <>
+            <Divider />
+            <StatusBadge status="strategy" label={idea.linkedGuidelineTitle} />
+          </>
+        ) : null}
+      </Card>
+
+      {idea.flowScore ? (
+        <>
+          <SectionHeader title="FlowScore atual" />
+          <FlowScoreCard score={idea.flowScore} />
+        </>
+      ) : null}
+
+      {pendingDecision ? (
+        <>
+          <SectionHeader
+            title="Avaliar"
+            subtitle="Cada dimensão vale de 0 a 10; o total é calculado pelo Flow"
+          />
+
+          <Card>
+            {DIMENSIONS.map((dimension) => (
+              <View key={dimension} style={styles.dimension}>
+                <View style={styles.dimensionHeader}>
+                  <Txt variant="label" color={theme.colors.text.secondary}>
+                    {flowScoreDimensionLabel[dimension]}
+                  </Txt>
+                  <Txt variant="label" color={theme.colors.text.brand}>
+                    {components[dimension]}
+                  </Txt>
+                </View>
+
+                <ChipRow>
+                  {Array.from({ length: 11 }).map((_, value) => (
+                    <Chip
+                      key={value}
+                      label={String(value)}
+                      selected={components[dimension] === value}
+                      onPress={() => setComponents((c) => ({ ...c, [dimension]: value }))}
+                    />
+                  ))}
+                </ChipRow>
+              </View>
+            ))}
+
+            <Button
+              title="Calcular FlowScore"
+              onPress={() =>
+                run(
+                  () =>
+                    setFlowScore.mutateAsync({
+                      id: ideaId,
+                      components: {
+                        strategicAlignment: components.strategicAlignment,
+                        impact: components.impact,
+                        feasibility: components.feasibility,
+                        urgency: components.urgency,
+                        confidence: components.confidence,
+                      },
+                    }),
+                  'FlowScore calculado.'
+                )
+              }
+              loading={setFlowScore.isPending}
+              variant="secondary"
+              style={styles.blockGap}
+            />
+          </Card>
+
+          <SectionHeader title="Nota manual" subtitle="Sua avaliação direta, soberana sobre o cálculo" />
+
+          <Card>
+            <View style={styles.scoreRow}>
+              <View style={styles.flex}>
+                <Field
+                  label="Nota de 0 a 100"
+                  value={scoreInput}
+                  onChangeText={setScoreInput}
+                  placeholder={idea.score !== null ? String(idea.score) : '0 a 100'}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                />
+              </View>
+            </View>
+
+            <Button
+              title="Salvar nota"
+              onPress={() => {
+                const value = Number(scoreInput);
+                if (!Number.isFinite(value) || value < 0 || value > 100) {
+                  setError('A nota precisa estar entre 0 e 100.');
+                  return;
+                }
+                void run(() => setScore.mutateAsync({ id: ideaId, score: value }), 'Nota registrada.');
+              }}
+              loading={setScore.isPending}
+              disabled={scoreInput.trim().length === 0}
+              variant="secondary"
+            />
+          </Card>
+
+          <SectionHeader title="Prioridade" />
+
+          <ChipRow>
+            {(Object.keys(ideaPriorityLabel) as IdeaPriority[]).map((priority) => (
+              <Chip
+                key={priority}
+                label={ideaPriorityLabel[priority]}
+                selected={idea.priority === priority}
+                onPress={() =>
+                  run(
+                    () => setPriority.mutateAsync({ id: ideaId, priority }),
+                    `Prioridade definida como ${ideaPriorityLabel[priority].toLowerCase()}.`
+                  )
+                }
+              />
+            ))}
+          </ChipRow>
+        </>
+      ) : null}
+
+      <SectionHeader title="Comentários" />
+
+      {comments.data && comments.data.length > 0 ? (
+        <View style={styles.comments}>
+          {comments.data.map((comment) => (
+            <Card key={comment.id}>
+              <View style={styles.commentHeader}>
+                <Txt variant="label">{comment.authorName}</Txt>
+                <Txt variant="caption" color={theme.colors.text.muted}>
+                  {formatDateTime(comment.createdAt)}
+                </Txt>
+              </View>
+              <Txt variant="body" color={theme.colors.text.secondary} style={styles.paragraph}>
+                {comment.body}
+              </Txt>
+            </Card>
+          ))}
         </View>
       ) : null}
 
-      {canAct && (
-        <View style={styles.actionsSection}>
-          <FormInput
-            label="Comment (required for rejection)"
-            value={comment}
-            onChangeText={setComment}
-            placeholder="Add a comment..."
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            inputStyle={{ minHeight: 72 }}
-          />
-          <View style={styles.actionsRow}>
-            <Button
-              variant="success"
-              label="Approve"
-              onPress={handleApprove}
-              loading={actionLoading}
-              style={styles.actionBtn}
-            />
-            <Button
-              variant="danger"
-              label="Reject"
-              onPress={handleReject}
-              loading={actionLoading}
-              style={styles.actionBtn}
-            />
-          </View>
-        </View>
-      )}
+      <Card style={styles.blockGap}>
+        <Field
+          label="Novo comentário"
+          value={commentBody}
+          onChangeText={setCommentBody}
+          placeholder="Peça um detalhe, registre uma dúvida ou explique o encaminhamento."
+          multiline
+          maxLength={2000}
+        />
+        <Button
+          title="Comentar"
+          onPress={() =>
+            run(async () => {
+              await addComment.mutateAsync({ id: ideaId, body: commentBody.trim() });
+              setCommentBody('');
+            }, 'Comentário publicado. O autor foi notificado.')
+          }
+          loading={addComment.isPending}
+          disabled={commentBody.trim().length === 0}
+          variant="secondary"
+        />
+      </Card>
 
-      {!canAct && (
-        <Text style={styles.resolvedNote}>
-          This idea has already been {idea.status.toLowerCase()}.
-        </Text>
-      )}
-    </ScreenContainer>
+      {pendingDecision ? (
+        <View style={styles.actions}>
+          <Button title="Aprovar ideia" onPress={() => setDeciding('approve')} />
+          <Button title="Não aprovar" onPress={() => setDeciding('reject')} variant="danger" />
+        </View>
+      ) : null}
+
+      {idea.status === 'Approved' ? (
+        <View style={styles.actions}>
+          <Button
+            title="Pedir rascunho de projeto ao copiloto"
+            onPress={() => navigation.navigate('ProjectDraftReview', { ideaId })}
+            variant="secondary"
+          />
+        </View>
+      ) : null}
+
+      <ConfirmDialog
+        visible={deciding !== null}
+        title={deciding === 'approve' ? 'Aprovar ideia' : 'Não aprovar ideia'}
+        message={
+          deciding === 'approve'
+            ? 'O autor será notificado e receberá 50 pontos. A decisão fica registrada na auditoria.'
+            : 'Explique por que a ideia não segue. A justificativa vai para o autor e fica registrada.'
+        }
+        confirmLabel={deciding === 'approve' ? 'Aprovar' : 'Não aprovar'}
+        destructive={deciding === 'reject'}
+        loading={decide.isPending}
+        onConfirm={confirmDecision}
+        onCancel={() => {
+          setDeciding(null);
+          setDecisionComment('');
+        }}
+      >
+        <Field
+          label={deciding === 'approve' ? 'Comentário (opcional)' : 'Justificativa'}
+          value={decisionComment}
+          onChangeText={setDecisionComment}
+          placeholder={
+            deciding === 'approve'
+              ? 'O que fez esta ideia avançar.'
+              : 'Um "não" sem motivo faz as pessoas pararem de enviar ideias.'
+          }
+          multiline
+          required={deciding === 'reject'}
+          maxLength={2000}
+        />
+      </ConfirmDialog>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  title: {
-    ...theme.typography.title,
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.sm,
-  },
-  metaRow: {
+  flex: { flex: 1 },
+  first: { marginTop: theme.spacing.lg },
+  badges: { flexDirection: 'row', gap: theme.spacing.sm, marginBottom: theme.spacing.md },
+  title: { marginBottom: theme.spacing.xs },
+  paragraph: { marginTop: theme.spacing.xs },
+  blockGap: { marginTop: theme.spacing.lg },
+  dimension: { marginBottom: theme.spacing.lg },
+  dimensionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    marginBottom: theme.spacing.xl,
-  },
-  priority: {
-    ...theme.typography.label,
-    color: theme.colors.text.secondary,
-  },
-  sectionLabel: {
-    ...theme.typography.label,
-    color: theme.colors.text.secondary,
-    marginTop: theme.spacing.xl,
+    justifyContent: 'space-between',
     marginBottom: theme.spacing.xs,
   },
-  body: {
-    ...theme.typography.body,
-    color: theme.colors.text.primary,
-    lineHeight: 22,
-  },
-  section: { marginTop: theme.spacing.xl },
-  actionsSection: { marginTop: theme.spacing.xxl },
-  actionsRow: {
+  scoreRow: { flexDirection: 'row', gap: theme.spacing.md },
+  comments: { gap: theme.spacing.md },
+  commentHeader: {
     flexDirection: 'row',
-    gap: theme.spacing.md,
-    marginTop: theme.spacing.md,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.spacing.sm,
   },
-  actionBtn: { flex: 1 },
-  resolvedNote: {
-    ...theme.typography.body,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginTop: theme.spacing.xxl,
-  },
-  errorText: {
-    ...theme.typography.body,
-    textAlign: 'center',
-    color: theme.colors.status.rejected.text,
-    marginTop: theme.spacing.xxxl,
-    padding: theme.spacing.lg,
-  },
+  actions: { gap: theme.spacing.sm, marginTop: theme.spacing.xl },
 });
