@@ -25,12 +25,66 @@ public sealed class MongoRefreshTokenRepository
                 Filter.Gt(x => x.ExpiresAt, DateTimeOffset.UtcNow)))
             .ToListAsync(cancellationToken);
 
-    public Task UpdateAsync(RefreshToken token, CancellationToken cancellationToken = default) =>
-        ReplaceAsync(Filter.Eq(x => x.Id, token.Id), token, upsert: false, cancellationToken);
+    /// <summary>
+    /// Compare-and-set: the state the caller believes in is part of the filter, so the
+    /// write only lands if that belief is still true when the server applies it.
+    ///
+    /// The condition is deliberately the full one — right token, right owner, not yet
+    /// revoked, not yet expired — rather than a match on id alone. An update by id would
+    /// happily overwrite a rotation another request had just committed.
+    /// </summary>
+    public async Task<bool> TryConsumeAsync(
+        string tokenHash,
+        Guid userId,
+        string replacementTokenHash,
+        DateTimeOffset consumedAt,
+        CancellationToken cancellationToken = default)
+    {
+        var stillUnconsumed = Filter.And(
+            Filter.Eq(x => x.TokenHash, tokenHash),
+            Filter.Eq(x => x.UserId, userId),
+            Filter.Eq(x => x.RevokedAt, null),
+            Filter.Gt(x => x.ExpiresAt, consumedAt));
+
+        var consume = Update
+            .Set(x => x.RevokedAt, (DateTimeOffset?)consumedAt)
+            .Set(x => x.ReplacedByTokenHash, replacementTokenHash);
+
+        try
+        {
+            var result = await UpdateAsync(stillUnconsumed, consume, cancellationToken);
+            return result.ModifiedCount == 1;
+        }
+        catch (MongoException ex) when (ex.HasErrorLabel("TransientTransactionError"))
+        {
+            // Both requests reached the same document inside overlapping transactions and
+            // the server aborted this one. That is losing the race, not a server fault, so
+            // it answers like every other loser instead of surfacing as a 500.
+            return false;
+        }
+    }
+
+    public async Task<bool> TryRevokeAsync(
+        string tokenHash,
+        Guid userId,
+        DateTimeOffset revokedAt,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await UpdateAsync(
+            Filter.And(
+                Filter.Eq(x => x.TokenHash, tokenHash),
+                Filter.Eq(x => x.UserId, userId),
+                Filter.Eq(x => x.RevokedAt, null),
+                Filter.Gt(x => x.ExpiresAt, revokedAt)),
+            Update.Set(x => x.RevokedAt, (DateTimeOffset?)revokedAt),
+            cancellationToken);
+
+        return result.ModifiedCount == 1;
+    }
 
     /// <summary>
-    /// Used when a revoked token is replayed: the safest response is to invalidate every
-    /// live session for that user rather than guess which one was stolen.
+    /// Used when a consumed token is presented again: the safest response is to invalidate
+    /// every live session for that user rather than guess which one was stolen.
     /// </summary>
     public Task RevokeAllForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
         UpdateManyAsync(

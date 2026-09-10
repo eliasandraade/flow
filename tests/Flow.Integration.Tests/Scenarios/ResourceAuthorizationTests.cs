@@ -228,9 +228,9 @@ public class ResourceAuthorizationTests : IntegrationTestBase
         var (_, mine) = await IdeaToProjectAsync(author, manager, managerId, "Meu projeto");
         var (_, theirs) = await IdeaToProjectAsync(stranger, manager, managerId, "Projeto de outro");
 
-        var listed = await author.GetFromJsonAsync<List<ProjectSummary>>("/api/v1/projects");
+        var listed = (await author.GetFromJsonAsync<List<ProjectSummary>>("/api/v1/projects"))!;
 
-        listed!.Select(p => p.Id).Should().Contain(mine,
+        listed.Select(p => p.Id).Should().Contain(mine,
             because: "the specification grants an operator visibility of their own trail");
         listed.Select(p => p.Id).Should().NotContain(theirs,
             because: "a list endpoint must not enumerate what the caller may not open");
@@ -283,8 +283,8 @@ public class ResourceAuthorizationTests : IntegrationTestBase
         (await reader.GetAsync($"/api/v1/projects/{projectId}/result")).StatusCode
             .Should().Be(HttpStatusCode.OK);
 
-        var listed = await reader.GetFromJsonAsync<List<ProjectSummary>>("/api/v1/projects");
-        listed!.Select(p => p.Id).Should().Contain(projectId);
+        var listed = (await reader.GetFromJsonAsync<List<ProjectSummary>>("/api/v1/projects"))!;
+        listed.Select(p => p.Id).Should().Contain(projectId);
     }
 
     // ─── Unauthenticated stays 401, never 403 ───────────────────────────────

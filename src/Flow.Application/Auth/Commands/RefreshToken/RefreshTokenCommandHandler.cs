@@ -48,29 +48,59 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
             throw new UnauthorizedException("Refresh token does not belong to this user.");
 
         if (!storedToken.IsActive)
-        {
-            // A revoked token being presented again is the classic replay signature: the
-            // safe response is to invalidate the whole chain and force a fresh login.
-            _logger.LogWarning(
-                "Refresh token replay detected for user {UserId}. Revoking all active tokens.", userId);
-            await _refreshTokens.RevokeAllForUserAsync(userId, cancellationToken);
-            throw new UnauthorizedException("Refresh token is expired or revoked.");
-        }
+            await RejectAsReuseAsync(userId, cancellationToken);
 
         var user = await _userManager.FindByIdAsync(userId.ToString())
             ?? throw new NotFoundException(nameof(User), userId);
 
         var roles = await _userManager.GetRolesAsync(user);
 
-        return await _unitOfWork.ExecuteAsync(async ct =>
+        try
         {
-            var (result, issued) = await _tokenIssuer.IssueAsync(user, roles, ct);
+            return await _unitOfWork.ExecuteAsync(async ct =>
+            {
+                var (result, issued) = await _tokenIssuer.IssueAsync(user, roles, ct);
 
-            // Rotation: the presented token dies here and points at its replacement.
-            storedToken.RotateTo(issued);
-            await _refreshTokens.UpdateAsync(storedToken, ct);
+                // The check above was a courtesy, not the guarantee: between reading the
+                // token and getting here another request may have consumed it. Consumption
+                // is therefore conditional on the token still being unconsumed, decided by
+                // the database in one operation. Losing means the replacement just issued
+                // is rolled back with the transaction, so no orphan chain survives.
+                var consumed = await _refreshTokens.TryConsumeAsync(
+                    tokenHash, userId, issued.TokenHash, DateTimeOffset.UtcNow, ct);
 
-            return result;
-        }, cancellationToken);
+                if (!consumed) throw new RefreshTokenAlreadyConsumedException();
+
+                return result;
+            }, cancellationToken);
+        }
+        catch (RefreshTokenAlreadyConsumedException)
+        {
+            // Runs outside the transaction, which has already been rolled back.
+            await RejectAsReuseAsync(userId, cancellationToken);
+            throw;
+        }
     }
+
+    /// <summary>
+    /// A token presented after it was consumed is the classic theft signature, and a
+    /// request that loses the rotation race is indistinguishable from it. Both invalidate
+    /// the whole chain, which is the conservative reading of the OAuth 2.0 security
+    /// guidance and the behaviour the API already documents.
+    /// </summary>
+    private async Task RejectAsReuseAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        _logger.LogWarning(
+            "Refresh token reuse detected for user {UserId}. Revoking all active tokens.", userId);
+
+        await _refreshTokens.RevokeAllForUserAsync(userId, cancellationToken);
+        throw new UnauthorizedException("Refresh token is expired or revoked.");
+    }
+
+    /// <summary>
+    /// Signals, from inside the transaction, that this request lost the rotation race.
+    /// Throwing is what rolls the transaction back, so the replacement token that was just
+    /// issued never reaches the database.
+    /// </summary>
+    private sealed class RefreshTokenAlreadyConsumedException : Exception;
 }

@@ -18,15 +18,17 @@ public class LogoutCommandHandler : IRequestHandler<LogoutCommand>
 
     public async Task Handle(LogoutCommand request, CancellationToken cancellationToken)
     {
-        var tokenHash = DomainRefreshToken.Hash(request.RefreshToken);
-        var token = await _refreshTokens.GetByHashAsync(tokenHash, cancellationToken);
+        var userId = _currentUser.UserId;
+        if (userId is null) return;
 
-        // Logging out with someone else's token must not revoke it, and a token that is
-        // already inactive needs no work.
-        if (token is null || token.UserId != _currentUser.UserId || !token.IsActive)
-            return;
-
-        token.Revoke();
-        await _refreshTokens.UpdateAsync(token, cancellationToken);
+        // Ownership and liveness are conditions on the write, not checks made beforehand:
+        // logging out with someone else's token must not revoke it, and a token that is
+        // already inactive needs no work. A no-op is a successful logout either way, so
+        // the result is deliberately not inspected.
+        await _refreshTokens.TryRevokeAsync(
+            DomainRefreshToken.Hash(request.RefreshToken),
+            userId.Value,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
     }
 }
