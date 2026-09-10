@@ -63,36 +63,70 @@ jobs:
       # Testcontainers against the Docker daemon the runner provides. There is deliberately
       # no fallback: a test that cannot reach a database fails rather than passing quietly,
       # so a green run here means the database tests really ran.
+      # LogFilePrefix, not LogFileName: a fixed name makes every test project overwrite the
+      # same file, and the guard below would then read one project's totals as the whole
+      # suite. The prefix form gives each project its own file.
       - name: Test (Release)
         run: >-
           dotnet test Flow.sln -c Release --no-build
-          --logger "trx;LogFileName=results.trx"
+          --logger "trx;LogFilePrefix=flow"
           --results-directory ./test-results
 
-      # A skipped test is invisible in a summary line. This makes it loud.
-      - name: Refuse skipped tests
+      # A skipped test is invisible in a summary line, and so is a suite that quietly
+      # stopped running one of its projects. This makes both loud.
+      - name: Refuse skipped or missing tests
         if: always()
         run: |
           set -euo pipefail
           shopt -s nullglob
           files=(./test-results/*.trx)
+          expected_projects=$(ls -d tests/*/ | wc -l)
+
+          echo "Found ${#files[@]} result files for $expected_projects test projects."
+
           if [ ${#files[@]} -eq 0 ]; then
             echo "::error::No test results were produced."
             exit 1
           fi
-          skipped=$(grep -ho 'skipped="[0-9]*"' "${files[@]}" \
-            | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
-          total=$(grep -ho 'total="[0-9]*"' "${files[@]}" \
-            | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
-          echo "Executed $total tests, $skipped skipped."
-          if [ "$skipped" != "0" ]; then
-            echo "::error::$skipped test(s) were skipped. The suite must run in full."
+
+          # The prefix carries a second-resolution timestamp, so two projects finishing
+          # within the same second would share a file and the totals below would undercount.
+          # Failing here is the honest outcome; a silent undercount is not.
+          if [ ${#files[@]} -ne "$expected_projects" ]; then
+            echo "::error::Expected one result file per test project. Some results are missing or collided."
             exit 1
           fi
+
+          # The counters are named by the trx schema, not by the console summary: a skipped
+          # test is "notExecuted" there, and there is no "skipped" attribute at all. Summing
+          # a name that never appears would report zero skipped forever.
+          sum() {
+            grep -ho "$1=\"[0-9]*\"" "${files[@]}" | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}'
+          }
+
+          total=$(sum total)
+          executed=$(sum executed)
+          not_executed=$(sum notExecuted)
+          failed=$(sum failed)
+
+          echo "total=$total executed=$executed notExecuted=$not_executed failed=$failed"
+
+          if [ "$not_executed" != "0" ] || [ "$total" != "$executed" ]; then
+            echo "::error::$not_executed test(s) did not run. The suite must run in full."
+            exit 1
+          fi
+
+          if [ "$failed" != "0" ]; then
+            echo "::error::$failed test(s) failed."
+            exit 1
+          fi
+
           if [ "$total" -lt 300 ]; then
             echo "::error::Only $total tests ran; the suite is expected to be larger."
             exit 1
           fi
+
+          echo "All $total tests ran and passed."
 
       - name: Upload test results
         if: always()
