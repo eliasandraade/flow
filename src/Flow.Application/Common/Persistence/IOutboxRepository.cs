@@ -23,6 +23,9 @@ public interface IOutboxRepository
     /// would otherwise strand the message in Processing forever, so once the lease lapses
     /// another worker may take it over — which covers a crashed process, a restarted pod
     /// and a deploy in the middle of a batch.
+    ///
+    /// Each claim carries a fresh <see cref="OutboxMessage.LeaseToken"/>, which the caller
+    /// must present to <see cref="TryCompleteAsync"/> for its write to be accepted.
     /// </summary>
     /// <param name="owner">Identifies the claiming worker. Diagnostic only.</param>
     Task<IReadOnlyList<OutboxMessage>> ClaimDueAsync(
@@ -32,7 +35,23 @@ public interface IOutboxRepository
         int limit,
         CancellationToken cancellationToken = default);
 
-    Task UpdateAsync(OutboxMessage message, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Writes the outcome of an attempt, but only if this worker still owns the claim.
+    /// Returns false when it does not, meaning the lease lapsed and someone else took over.
+    ///
+    /// An unconditional write by id is not good enough, and the gap is real: a worker can
+    /// stall on a slow provider call for longer than its lease, another worker legitimately
+    /// recovers the message and processes it, and then the first one wakes up and saves the
+    /// conclusion it reached ages ago — flattening the newer state and the newer lease. The
+    /// document carrying a LeaseOwner does not help unless the write actually checks it.
+    ///
+    /// The token is passed in rather than read from the message because completing clears
+    /// the lease in memory first; the caller keeps the value it was given at claim time.
+    /// </summary>
+    Task<bool> TryCompleteAsync(
+        OutboxMessage message,
+        Guid leaseToken,
+        CancellationToken cancellationToken = default);
 
     Task<int> CountByStatusAsync(Domain.Enums.OutboxStatus status, CancellationToken cancellationToken = default);
 }

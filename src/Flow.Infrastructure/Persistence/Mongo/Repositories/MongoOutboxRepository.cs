@@ -62,12 +62,6 @@ public sealed class MongoOutboxRepository : MongoRepositoryBase<OutboxMessage>, 
                 Filter.Eq(x => x.Status, OutboxStatus.Processing),
                 Filter.Lte(x => x.LeaseExpiresAt, now)));
 
-        var claim = Update
-            .Set(x => x.Status, OutboxStatus.Processing)
-            .Set(x => x.LeaseOwner, owner)
-            .Set(x => x.LeaseExpiresAt, (DateTimeOffset?)now.Add(lease))
-            .Set(x => x.ClaimedAt, (DateTimeOffset?)now);
-
         var options = new FindOneAndUpdateOptions<OutboxMessage>
         {
             Sort = Sort.Ascending(x => x.NextAttemptAt),
@@ -78,6 +72,15 @@ public sealed class MongoOutboxRepository : MongoRepositoryBase<OutboxMessage>, 
 
         for (var i = 0; i < limit; i++)
         {
+            // A fresh token per claim, so a write from a previous claim of the same message
+            // by the same worker is still rejected.
+            var claim = Update
+                .Set(x => x.Status, OutboxStatus.Processing)
+                .Set(x => x.LeaseOwner, owner)
+                .Set(x => x.LeaseToken, (Guid?)Guid.NewGuid())
+                .Set(x => x.LeaseExpiresAt, (DateTimeOffset?)now.Add(lease))
+                .Set(x => x.ClaimedAt, (DateTimeOffset?)now);
+
             var session = ActiveSession;
 
             var message = session is null
@@ -94,8 +97,27 @@ public sealed class MongoOutboxRepository : MongoRepositoryBase<OutboxMessage>, 
         return claimed;
     }
 
-    public Task UpdateAsync(OutboxMessage message, CancellationToken cancellationToken = default) =>
-        ReplaceAsync(Filter.Eq(x => x.Id, message.Id), message, upsert: false, cancellationToken);
+    /// <summary>
+    /// Fenced write: the claim this worker is holding is part of the filter, so a write
+    /// arriving after the lease lapsed finds nothing to replace and reports it.
+    ///
+    /// MatchedCount rather than ModifiedCount, because the question is ownership, not
+    /// whether the document happened to change.
+    /// </summary>
+    public async Task<bool> TryCompleteAsync(
+        OutboxMessage message,
+        Guid leaseToken,
+        CancellationToken cancellationToken = default)
+    {
+        var stillOurs = Filter.And(
+            Filter.Eq(x => x.Id, message.Id),
+            Filter.Eq(x => x.Status, OutboxStatus.Processing),
+            Filter.Eq(x => x.LeaseToken, (Guid?)leaseToken));
+
+        var result = await ReplaceAsync(stillOurs, message, upsert: false, cancellationToken);
+
+        return result.MatchedCount == 1;
+    }
 
     public async Task<int> CountByStatusAsync(
         OutboxStatus status, CancellationToken cancellationToken = default) =>

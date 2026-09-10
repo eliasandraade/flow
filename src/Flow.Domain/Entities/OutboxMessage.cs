@@ -32,8 +32,19 @@ public class OutboxMessage
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DispatchedAt { get; private set; }
 
-    /// <summary>Which worker holds the claim. Diagnostic; the lease is what enforces it.</summary>
+    /// <summary>Which worker holds the claim. Diagnostic; the token is what enforces it.</summary>
     public string? LeaseOwner { get; private set; }
+
+    /// <summary>
+    /// Fencing token, fresh on every claim.
+    ///
+    /// The owner alone is not enough to fence a write: the same worker can claim the same
+    /// message again later, after its first lease lapsed and someone else worked on it, and
+    /// a stale attempt would still match on the owner name. A token minted per claim makes
+    /// "the claim I am holding" a different value from "the claim I held", which is exactly
+    /// what a late write has to fail against.
+    /// </summary>
+    public Guid? LeaseToken { get; private set; }
 
     /// <summary>
     /// When the claim stops being respected. A worker that crashes after claiming does not
@@ -121,6 +132,7 @@ public class OutboxMessage
     {
         LeaseOwner = null;
         LeaseExpiresAt = null;
+        LeaseToken = null;
         ClaimedAt = null;
     }
 

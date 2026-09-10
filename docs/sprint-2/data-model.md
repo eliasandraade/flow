@@ -448,6 +448,7 @@ Gravada na **mesma transação** do domínio; despachada fora dela por um `Hoste
   "nextAttemptAt": ISODate("…"),
   "lastError": null,
   "leaseOwner": null,             // quem detém o claim, só para diagnóstico
+  "leaseToken": null,             // token de fencing, novo a cada claim
   "leaseExpiresAt": null,         // até quando o claim é respeitado
   "claimedAt": null,
   "createdAt": ISODate("…"), "dispatchedAt": null
@@ -483,9 +484,34 @@ O **lease** existe para o worker que morre no meio: pod reiniciado, processo mor
 durante o lote. Sem ele, a mensagem ficaria em `Processing` para sempre. Vencido o prazo,
 outro worker pode retomá-la — é o segundo ramo do filtro de claim.
 
-Nada disso depende de lock global nem de Redis. E se algo escapar, a chave de idempotência
-enviada ao provedor é a segunda camada: a mesma mensagem leva a mesma chave em toda
-tentativa.
+### Fencing: o claim precisa valer também na hora de concluir
+
+Claim atômico impede duas réplicas de **pegarem** a mesma mensagem. Não impede a mais lenta
+de **terminar**: o worker A pega, trava numa chamada ao provedor por mais tempo que o lease,
+o worker B recupera legitimamente e processa, e então A acorda e grava a conclusão a que
+chegou há muito tempo. Se essa escrita for endereçada só pelo `_id`, ela entra e achata o
+resultado e o lease de B.
+
+Ter `leaseOwner` no documento não resolve se a escrita final não conferir o lease. E só o
+nome do worker também não basta: o mesmo worker pode ter dois claims diferentes da mesma
+mensagem ao longo do tempo, e uma escrita do primeiro casaria pelo nome.
+
+Por isso cada claim cunha um **`leaseToken` novo**, e toda mutação pós-claim é condicionada:
+
+```text
+_id == mensagem
+  AND status == Processing
+  AND leaseToken == token que este worker recebeu no claim
+```
+
+Sem correspondência, o worker perdeu o lease e **não sobrescreve** o estado atual — a
+tentativa é descartada e registrada em log.
+
+Nada disso depende de lock global nem de Redis. E como transação Mongo e requisição HTTP
+externa não podem ser atômicas juntas, a defesa tem duas camadas: o fencing interno impede
+a sobrescrita, e a chave de idempotência enviada ao provedor impede a duplicata — a mesma
+mensagem leva a mesma chave em toda tentativa, inclusive quando é retomada por outro
+worker.
 
 > **Duas chaves de idempotência, de propósito.** `dedupeKey` é nossa, moldada para o nosso
 > armazenamento: legível, com significado, única por evento de negócio. Já o provedor de

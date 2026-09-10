@@ -126,6 +126,12 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Captured before anything mutates the message: completing clears the lease in
+            // memory, and this is the value the write has to be fenced against.
+            var fence = message.LeaseToken
+                ?? throw new InvalidOperationException(
+                    "A claimed outbox message must carry a lease token.");
+
             var result = await sender.SendAsync(
                 new PushNotificationRequest(
                     message.UserId, message.Title, message.Body, message.DeepLink,
@@ -141,22 +147,18 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
             {
                 case PushDeliveryOutcome.Delivered:
                     message.MarkDispatched(completedAt);
-                    metrics?.NotificationSent();
-                    dispatched++;
                     break;
 
                 case PushDeliveryOutcome.TransientFailure:
                     // Backoff with jitter, and a dead-letter once the attempts run out.
                     message.MarkFailed(
                         result.Error ?? "Transient failure", _options.MaxAttempts, completedAt);
-                    metrics?.NotificationFailed("transient");
                     break;
 
                 case PushDeliveryOutcome.PermanentFailure:
                     // No point retrying a malformed request or a rejected credential.
                     message.MarkFailed(
                         result.Error ?? "Permanent failure", maxAttempts: 1, completedAt);
-                    metrics?.NotificationFailed("permanent");
                     break;
 
                 case PushDeliveryOutcome.NotConfigured:
@@ -164,11 +166,43 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
                     // claim is handed back rather than left to lapse, and no attempt is
                     // counted, because nothing was actually tried.
                     message.ReleaseClaim();
-                    await outbox.UpdateAsync(message, cancellationToken);
+                    await outbox.TryCompleteAsync(message, fence, cancellationToken);
                     return dispatched;
             }
 
-            await outbox.UpdateAsync(message, cancellationToken);
+            var written = await outbox.TryCompleteAsync(message, fence, cancellationToken);
+
+            if (!written)
+            {
+                // The lease lapsed while the provider was being called, and another worker
+                // has taken the message over. Its state is newer than ours and must not be
+                // flattened by a conclusion we reached before losing the claim. What keeps
+                // this from becoming a duplicate push is the other half of the defence: the
+                // provider-side idempotency key is derived from the message id, so both
+                // attempts carry the same one.
+                _logger.LogWarning(
+                    "Outbox message {MessageId} was completed by another worker while this one "
+                    + "was delivering. The result of this attempt is discarded.",
+                    message.Id);
+
+                continue;
+            }
+
+            // Counted only once the write was accepted: an attempt whose result was
+            // discarded did not happen as far as the system is concerned.
+            switch (result.Outcome)
+            {
+                case PushDeliveryOutcome.Delivered:
+                    metrics?.NotificationSent();
+                    dispatched++;
+                    break;
+                case PushDeliveryOutcome.TransientFailure:
+                    metrics?.NotificationFailed("transient");
+                    break;
+                case PushDeliveryOutcome.PermanentFailure:
+                    metrics?.NotificationFailed("permanent");
+                    break;
+            }
 
             if (message.Status == Domain.Enums.OutboxStatus.DeadLettered)
             {
