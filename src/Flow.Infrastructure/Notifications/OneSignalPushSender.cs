@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Flow.Application.Common.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -102,13 +103,22 @@ public sealed class OneSignalPushSender : IPushNotificationSender
     }
 
     /// <summary>
-    /// A 2xx from this endpoint does not mean a notification exists.
+    /// A 2xx from this endpoint does not mean a notification exists, and an "errors" field
+    /// does not mean it does not.
     ///
-    /// The provider answers 200 for any request it accepted, and only returns an id when a
-    /// message was actually created; no id means it was not, typically because nobody in
-    /// the target audience has a live subscription. Treating every 2xx as delivered is how
-    /// an outbox ends up full of messages marked as sent that nobody ever received, which
-    /// is worse than a queue that is honestly stuck.
+    /// The provider answers 200 for any request it accepted, and <c>id</c> is what
+    /// discriminates: a UUID means the message was created and dispatched to at least one
+    /// subscriber; an empty or absent id means nothing was created. Treating every 2xx as
+    /// delivered fills an outbox with messages marked sent that nobody received.
+    ///
+    /// <c>errors</c> is polymorphic and cannot be read as one shape. It arrives as an array
+    /// of strings when nothing was created — "All included players are not subscribed" — and
+    /// as an object when the message <b>was</b> created but some recipients were skipped,
+    /// carrying keys such as invalid_aliases or invalid_player_ids. Both forms travel under
+    /// the same name, so the field is kept as raw JSON and interpreted, rather than being
+    /// bound to a type that only fits half the contract. Binding it to a list of strings
+    /// made the object form throw, which turned a partial success into an unreadable body
+    /// and a retry of a message that had already gone out.
     /// </summary>
     private async Task<PushDeliveryResult> InterpretSuccessAsync(
         HttpResponseMessage response,
@@ -132,19 +142,31 @@ public sealed class OneSignalPushSender : IPushNotificationSender
         }
 
         if (!string.IsNullOrWhiteSpace(body?.Id))
-            return PushDeliveryResult.Delivered(body!.Id);
+        {
+            // Created. Anything in errors describes recipients that were skipped, not the
+            // message, so it is a warning and not a failure — reporting it as a failure
+            // would schedule a retry of a notification that already went out.
+            if (Describe(body!.Errors) is { } skipped)
+            {
+                _logger.LogWarning(
+                    "Push provider created message {ProviderMessageId} for outbox message "
+                    + "{DeliveryId} but skipped some recipients: {Skipped}",
+                    body.Id, request.DeliveryId, skipped);
+            }
 
-        // The provider states why it created nothing. That is a fact about this recipient,
-        // not a blip, so retrying the same message would just repeat the same answer.
-        if (body?.Errors is { Count: > 0 })
+            return PushDeliveryResult.Delivered(body!.Id);
+        }
+
+        // No id: nothing was created. The provider usually says why, and the reason is a
+        // fact about this recipient rather than a blip, so retrying would just repeat it.
+        if (Describe(body?.Errors) is { } reason)
         {
             _logger.LogWarning(
                 "Push provider accepted the request for outbox message {DeliveryId} but created "
                 + "no message: {Reason}",
-                request.DeliveryId, string.Join("; ", body.Errors));
+                request.DeliveryId, reason);
 
-            return PushDeliveryResult.Permanent(
-                $"Provider created no message: {string.Join("; ", body.Errors)}");
+            return PushDeliveryResult.Permanent($"Provider created no message: {reason}");
         }
 
         // Accepted, no id, no reason. Ambiguous, and one more attempt is safe precisely
@@ -153,6 +175,59 @@ public sealed class OneSignalPushSender : IPushNotificationSender
         return PushDeliveryResult.Transient(
             "Provider returned success without a message id and without a reason.");
     }
+
+    /// <summary>
+    /// Turns whichever shape "errors" arrived in into one short line, or null when there is
+    /// nothing to say.
+    ///
+    /// The object form is summarised by key and count rather than dumped: its values are
+    /// lists of recipient identifiers, and a log line is not the place to spill a list of
+    /// users. The shape is what a person debugging this actually needs.
+    /// </summary>
+    private static string? Describe(JsonElement? errors)
+    {
+        if (errors is not { } element) return null;
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Array:
+            {
+                var reasons = element.EnumerateArray()
+                    .Where(item => item.ValueKind == JsonValueKind.String)
+                    .Select(item => item.GetString())
+                    .Where(text => !string.IsNullOrWhiteSpace(text))
+                    .Take(5)
+                    .ToArray();
+
+                return reasons.Length == 0 ? null : string.Join("; ", reasons);
+            }
+
+            case JsonValueKind.Object:
+            {
+                var parts = element.EnumerateObject()
+                    .Take(5)
+                    .Select(property => $"{property.Name}({Count(property.Value)})")
+                    .ToArray();
+
+                return parts.Length == 0 ? null : string.Join("; ", parts);
+            }
+
+            case JsonValueKind.String:
+                return string.IsNullOrWhiteSpace(element.GetString()) ? null : element.GetString();
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>How many entries a nested error value holds, without revealing them.</summary>
+    private static int Count(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Array => value.GetArrayLength(),
+        JsonValueKind.Object => value.EnumerateObject().Sum(nested => Count(nested.Value)),
+        JsonValueKind.Undefined or JsonValueKind.Null => 0,
+        _ => 1
+    };
 
     private static bool IsTransient(HttpStatusCode status) =>
         status is HttpStatusCode.RequestTimeout
@@ -199,6 +274,11 @@ public sealed class OneSignalPushSender : IPushNotificationSender
     private sealed class OneSignalResponse
     {
         [JsonPropertyName("id")] public string? Id { get; init; }
-        [JsonPropertyName("errors")] public List<string>? Errors { get; init; }
+
+        // Raw on purpose: the provider sends an array of strings in one situation and an
+        // object in another, under the same name. See InterpretSuccessAsync.
+        [JsonPropertyName("errors")] public JsonElement? Errors { get; init; }
+
+        [JsonPropertyName("warnings")] public JsonElement? Warnings { get; init; }
     }
 }

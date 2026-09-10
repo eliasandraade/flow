@@ -167,6 +167,79 @@ public class OneSignalSenderTests
     }
 
     [Fact]
+    public async Task SuccessWithAMessageIdAndPartialErrorsIsStillDelivered()
+    {
+        // The shape the provider returns when the notification WAS created but some
+        // recipients were skipped. Here "errors" is an object, not an array of strings, and
+        // it travels alongside a perfectly valid id.
+        var handler = new ScriptedHandler().Respond(
+            HttpStatusCode.OK,
+            """
+            {
+              "id": "5eb5a37e-b458-11e3-ac11-000c2940e62c",
+              "external_id": "9c1f0b6e-2f4a-4a5b-9c0d-1e2f3a4b5c6d",
+              "errors": {
+                "invalid_aliases": {
+                  "external_id": ["user_a", "user_b", "user_c"]
+                }
+              },
+              "warnings": ["some warning"]
+            }
+            """);
+
+        var result = await Create(handler).SendAsync(Request());
+
+        result.Outcome.Should().Be(PushDeliveryOutcome.Delivered,
+            because: "the id says the message was created; errors here describes skipped "
+                   + "recipients, and retrying would resend something that already went out");
+        result.ProviderMessageId.Should().Be("5eb5a37e-b458-11e3-ac11-000c2940e62c");
+    }
+
+    [Fact]
+    public async Task AnErrorsObjectDoesNotBreakParsingWhenThereIsNoId()
+    {
+        // Same object shape, but nothing was created. It must still parse, and it must
+        // still not count as delivered.
+        var handler = new ScriptedHandler().Respond(
+            HttpStatusCode.OK,
+            """{"id":"","errors":{"invalid_player_ids":["a","b"]},"warnings":{}}""");
+
+        var result = await Create(handler).SendAsync(Request());
+
+        result.Outcome.Should().NotBe(PushDeliveryOutcome.Delivered);
+        result.Outcome.Should().Be(PushDeliveryOutcome.PermanentFailure);
+        result.Error.Should().Contain("invalid_player_ids");
+    }
+
+    [Fact]
+    public async Task AResponseWithNoIdFieldAtAllAndAnErrorsObjectIsNotDelivered()
+    {
+        var handler = new ScriptedHandler().Respond(
+            HttpStatusCode.OK,
+            """{"errors":{"invalid_aliases":{"external_id":["only-one"]}}}""");
+
+        var result = await Create(handler).SendAsync(Request());
+
+        result.Outcome.Should().NotBe(PushDeliveryOutcome.Delivered,
+            because: "an absent id is as much of a no as an empty one");
+    }
+
+    [Fact]
+    public async Task TheErrorSummaryReportsShapeRatherThanRecipientIdentifiers()
+    {
+        var handler = new ScriptedHandler().Respond(
+            HttpStatusCode.OK,
+            """{"id":"","errors":{"invalid_aliases":{"external_id":["u-1","u-2","u-3"]}}}""");
+
+        var result = await Create(handler).SendAsync(Request());
+
+        result.Error.Should().Contain("invalid_aliases");
+        result.Error.Should().Contain("3", because: "the count is the useful part");
+        result.Error.Should().NotContain("u-1",
+            because: "the values are recipient identifiers and do not belong in an error string");
+    }
+
+    [Fact]
     public async Task SuccessWithoutAMessageIdButWithAReasonIsNotDelivered()
     {
         // The shape the provider actually returns when nobody in the audience is
