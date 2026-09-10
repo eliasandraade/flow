@@ -296,4 +296,128 @@ public class ForwardedHeadersTests
         // Development is allowed to run without a proxy at all.
         ForwardedHeadersSetup.Validate(settings, isDevelopment: true);
     }
+
+    // ─── The shape Compose actually produces ────────────────────────────────
+    //
+    // docker-compose.yml materialises both ForwardedHeaders__TrustedNetworks__0 and
+    // ForwardedHeaders__TrustedProxies__0 unconditionally, so whichever one the operator
+    // did not set arrives as an empty string rather than as an absent key. The deployment
+    // guide tells people to configure only TrustedNetworks behind Traefik, which means the
+    // documented configuration is exactly the one that carries an empty sibling.
+    //
+    // An empty entry is the operator saying nothing. It must not be parsed, and it must not
+    // count as a trusted source either — otherwise "no proxy configured" would look
+    // configured and slip past the startup check.
+
+    [Fact]
+    public async Task TheConfigurationComposeProducesForTraefikIsAccepted()
+    {
+        if (!_mongo.IsAvailable) throw new InvalidOperationException(_mongo.UnavailableReason);
+
+        // FORWARDED_TRUSTED_NETWORKS set, FORWARDED_TRUSTED_PROXIES left alone.
+        using var factory = CreateFactory(
+            ProxyAddress,
+            trustedNetworks: ["172.16.0.0/12"],
+            trustedProxies: [""]);
+
+        var seen = await AskAsync(factory.CreateClient(), ("X-Forwarded-For", "203.0.113.10"));
+
+        seen.RemoteIp.Should().Be("203.0.113.10",
+            because: "the documented Traefik configuration must actually start and work");
+    }
+
+    [Fact]
+    public async Task AnEmptyNetworkEntryDoesNotDiscardAConfiguredProxy()
+    {
+        if (!_mongo.IsAvailable) throw new InvalidOperationException(_mongo.UnavailableReason);
+
+        // The mirror image: FORWARDED_TRUSTED_PROXIES set, FORWARDED_TRUSTED_NETWORKS not.
+        using var factory = CreateFactory(
+            ProxyAddress,
+            trustedNetworks: [""],
+            trustedProxies: [ProxyAddress]);
+
+        var seen = await AskAsync(factory.CreateClient(), ("X-Forwarded-For", "203.0.113.10"));
+
+        seen.RemoteIp.Should().Be("203.0.113.10");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void ABlankEntryIsNotATrustedSource(string? blank)
+    {
+        var settings = new ForwardedHeadersSettings
+        {
+            Enabled = true,
+            TrustedNetworks = [blank!],
+            TrustedProxies = [blank!]
+        };
+
+        settings.HasTrustedSources.Should().BeFalse(
+            because: "an empty variable is an operator who configured nothing");
+
+        var act = () => ForwardedHeadersSetup.Validate(settings, isDevelopment: false);
+
+        act.Should().Throw<InvalidOperationException>(
+            because: "this is the case the startup check exists for");
+    }
+
+    [Fact]
+    public void BlankEntriesLeaveTheLoopbackDefaultsInPlaceRatherThanTrustingEveryone()
+    {
+        var options = new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions();
+        var defaults = new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions();
+
+        ForwardedHeadersSetup.Apply(options, new ForwardedHeadersSettings
+        {
+            Enabled = true,
+            TrustedNetworks = [""],
+            TrustedProxies = [""]
+        });
+
+        // Discarding an empty entry is not the same as deciding to believe anyone. Nothing
+        // was configured, so nothing beyond the framework's own loopback default is trusted.
+        options.KnownProxies.Should().HaveCount(defaults.KnownProxies.Count);
+        options.KnownNetworks.Should().HaveCount(defaults.KnownNetworks.Count);
+    }
+
+    [Theory]
+    [InlineData("banana")]
+    [InlineData("172.16.0.0")]
+    [InlineData("172.16.0.0/99")]
+    public void ANonEmptyNetworkThatIsStillWrongKeepsFailing(string network)
+    {
+        // Ignoring blanks must not turn into ignoring mistakes: a typo in a real value has
+        // to stop startup, not silently shrink the allow-list.
+        var settings = new ForwardedHeadersSettings
+        {
+            Enabled = true,
+            TrustedNetworks = ["", network]
+        };
+
+        var act = () => ForwardedHeadersSetup.Apply(
+            new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions(), settings);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*{network}*");
+    }
+
+    [Theory]
+    [InlineData("banana")]
+    [InlineData("172.16.0.0/12")]
+    public void ANonEmptyProxyThatIsStillWrongKeepsFailing(string proxy)
+    {
+        var settings = new ForwardedHeadersSettings
+        {
+            Enabled = true,
+            TrustedProxies = [" ", proxy]
+        };
+
+        var act = () => ForwardedHeadersSetup.Apply(
+            new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions(), settings);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*{proxy}*");
+    }
 }

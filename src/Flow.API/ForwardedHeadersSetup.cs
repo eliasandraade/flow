@@ -48,7 +48,33 @@ public sealed class ForwardedHeadersSettings
     /// <summary>Whether the proxy's Host header should be honoured as well.</summary>
     public bool TrustForwardedHost { get; set; }
 
-    public bool HasTrustedSources => TrustedProxies.Length > 0 || TrustedNetworks.Length > 0;
+    /// <summary>
+    /// The entries an operator actually wrote.
+    ///
+    /// docker-compose.yml materialises TrustedNetworks__0 and TrustedProxies__0 whether or
+    /// not the corresponding variable was set, so the one left alone arrives as an empty
+    /// string instead of being absent. Behind Traefik that is the normal case: the guide
+    /// says to configure the network and leave the proxy list alone.
+    ///
+    /// A blank entry is an operator who said nothing, so it is dropped before anything else
+    /// looks at the list. Dropping it is not the same as being permissive — what survives
+    /// is still an explicit allow-list, and a list that ends up empty is an unconfigured
+    /// proxy, which <see cref="ForwardedHeadersSetup.Validate"/> refuses in production.
+    /// </summary>
+    public IReadOnlyList<string> EffectiveTrustedProxies => Meaningful(TrustedProxies);
+
+    /// <inheritdoc cref="EffectiveTrustedProxies"/>
+    public IReadOnlyList<string> EffectiveTrustedNetworks => Meaningful(TrustedNetworks);
+
+    public bool HasTrustedSources =>
+        EffectiveTrustedProxies.Count > 0 || EffectiveTrustedNetworks.Count > 0;
+
+    private static IReadOnlyList<string> Meaningful(string[]? entries) =>
+        entries is null
+            ? []
+            : entries.Where(entry => !string.IsNullOrWhiteSpace(entry))
+                     .Select(entry => entry.Trim())
+                     .ToArray();
 }
 
 public static class ForwardedHeadersSetup
@@ -78,17 +104,19 @@ public static class ForwardedHeadersSetup
         options.KnownProxies.Clear();
         options.KnownNetworks.Clear();
 
-        foreach (var proxy in settings.TrustedProxies)
+        // Blank entries were already dropped; everything left is something the operator
+        // meant, so a value that does not parse is a mistake and stops startup.
+        foreach (var proxy in settings.EffectiveTrustedProxies)
         {
-            if (!IPAddress.TryParse(proxy.Trim(), out var address))
+            if (!IPAddress.TryParse(proxy, out var address))
                 throw new InvalidOperationException(
                     $"ForwardedHeaders:TrustedProxies contains an entry that is not an IP address: '{proxy}'.");
 
             options.KnownProxies.Add(address);
         }
 
-        foreach (var network in settings.TrustedNetworks)
-            options.KnownNetworks.Add(ParseNetwork(network.Trim()));
+        foreach (var network in settings.EffectiveTrustedNetworks)
+            options.KnownNetworks.Add(ParseNetwork(network));
     }
 
     /// <summary>
@@ -104,9 +132,10 @@ public static class ForwardedHeadersSetup
         {
             throw new InvalidOperationException(
                 "ForwardedHeaders:Enabled is true but no ForwardedHeaders:TrustedProxies or "
-                + "ForwardedHeaders:TrustedNetworks were configured. Only loopback would be "
-                + "trusted, so forwarded headers would be silently ignored behind a proxy. "
-                + "Configure the proxy addresses or the network it runs on.");
+                + "ForwardedHeaders:TrustedNetworks were configured, or every entry was "
+                + "empty. Only loopback would be trusted, so forwarded headers would be "
+                + "silently ignored behind a proxy. Configure the proxy addresses or the "
+                + "network it runs on.");
         }
 
         if (settings.ForwardLimit < 1)
