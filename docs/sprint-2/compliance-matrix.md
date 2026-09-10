@@ -12,7 +12,7 @@ auditoria inicial do código até a evidência final de verificação.
 ### Estado no fechamento
 
 - **Build:** `dotnet build Flow.sln` — 0 erros, **0 avisos**
-- **Testes:** **213** (124 Domain + 10 Application + 79 Integration contra MongoDB real), 0 falhas
+- **Testes:** **273** (124 Domain + 10 Application + 139 Integration contra MongoDB real), 0 falhas
 - **API:** 54 endpoints, `openapi.json` exportado da própria aplicação
 - **Mobile:** 23 telas, `tsc --noEmit` limpo, `expo-doctor` 18/18, bundle Android gerado
 - **Compliance:** **110 de 113** requisitos `VERIFIED` — ver [seção 10](#10-estado-final-por-área)
@@ -550,8 +550,8 @@ contra um MongoDB real e descartável, com transações reais.
 | RES-01..06 | Estimated e Actual independentes, ROI, produtividade, horas e qualidade, com precisão `Decimal128` verificada. |
 | DASH-01..06 | `DashboardTests` cobre base vazia e base realista; `DashboardCompositionTests` cobre a aritmética de borda. |
 | SEC-01, SEC-02 | ProblemDetails com `traceId`; `ValidationBehavior` ativo devolvendo 422. |
-| SEC-03 | Autorização por recurso verificada em `Idea_OfAnotherOperator_IsNotReadable`. |
-| SEC-08 | Rotação, revogação e hash do refresh token verificados. |
+| SEC-03 | Autorização por recurso verificada em `Idea_OfAnotherOperator_IsNotReadable`. **Revisado na seção 13:** a proteção existia só nesse endpoint, e os vizinhos não a tinham. |
+| SEC-08 | Rotação, revogação e hash do refresh token verificados. **Revisado na seção 13:** o consumo não era atômico sob concorrência. |
 | OBS-04 | `/health/live` e `/health/ready` respondendo, com o Mongo como dependência de readiness. |
 
 ### 6.3 Defeitos encontrados e corrigidos durante a fase
@@ -596,7 +596,7 @@ Registrados porque são exatamente o tipo de regressão que uma migração intro
 | EXT-01 | `OneSignalPushSender` sobre `POST https://api.onesignal.com/notifications` com `include_aliases.external_id`. Validação live pendente de credencial — ver seção 9. |
 | EXT-02 | Coleção `notifications` com leitura, marcação e deep link; 3 endpoints. |
 | EXT-03 | `notification_outbox` gravado na mesma transação do domínio; `OutboxDispatcherHostedService` despacha fora dela. |
-| EXT-04 | `ATransientFailureSchedulesARetryInsteadOfLosingTheMessage`, `RepeatedTransientFailuresEventuallyDeadLetter`, `APermanentFailureIsNotRetried` e `DispatchIsIdempotentAcrossDrains`. |
+| EXT-04 | `ATransientFailureSchedulesARetryInsteadOfLosingTheMessage`, `RepeatedTransientFailuresEventuallyDeadLetter`, `APermanentFailureIsNotRetried` e `DispatchIsIdempotentAcrossDrains`. **Revisado na seção 13:** valia para um dispatcher, não para duas réplicas. |
 | EXT-05 | Timeout e cancelamento propagados; breaker próprio para o Gemini; desfecho `NotConfigured` tratado como estado válido. |
 
 ### 7.2 Decisão registrada: context injection em vez de function calling
@@ -712,7 +712,7 @@ com a API.
 
 ```text
 dotnet build Flow.sln -c Release               0 erros, 0 avisos
-dotnet test  Flow.sln                        213 testes, 0 falhas
+dotnet test  Flow.sln                        273 testes, 0 falhas
 ./scripts/build-artifacts.sh                 dist/ gerado
 openapi.json                                  54 endpoints, 73 schemas, exportado da aplicação
 npx tsc --noEmit                              sem saída
@@ -786,6 +786,71 @@ Nenhuma delas depende de código que falte escrever.
 
 ---
 
+## 13. Rodada de revisão técnica independente
+
+Uma revisão da branch encontrou cinco problemas, todos confirmados no código e depois
+provados por teste antes de qualquer correção. O método foi sempre o mesmo: escrever o
+teste, rodá-lo contra o código publicado, ver a falha, corrigir, ver o teste passar.
+
+### 13.1 O que estava errado
+
+| # | Problema | Causa raiz | Evidência antes da correção |
+|---|---|---|---|
+| D15 | IDOR nos endpoints de leitura | A checagem por recurso estava escrita à mão dentro de um único handler, então os vizinhos nasceram sem ela | 5 testes falharam devolvendo **200** onde precisava ser 403: projeto, linha do tempo, **resultado financeiro**, comentários de ideia alheia, e a listagem enumerando projeto de outro operador |
+| D16 | Rotação de refresh token não atômica | Check-then-act: ler, conferir `IsActive` em memória, gravar por `_id` sem condição de estado | O perdedor recebia **500** (write conflict cru) e, depois da corrida, o token do vencedor **ainda funcionava** — sobrava uma segunda cadeia viva |
+| D17 | Chave de idempotência inválida no OneSignal | `DedupeKey` interno (`IdeaApproved:{id}:{id}`) enviado no campo que a API exige em UUID RFC 9562 | 4 testes falharam: a chave não era UUID, vazava para o provedor, e retentativas da mesma mensagem não reusavam a chave |
+| D18 | Falso positivo de entrega | Todo 2xx virava `Delivered` | 2 testes falharam: 200 sem `id` era marcado como entregue, quando a documentação diz que sem `id` **nada foi criado** |
+| D19 | Outbox inseguro entre réplicas | `GetDueAsync` seguido de `UpdateAsync`: janela entre ler e marcar | 12 mensagens e 4 dispatchers concorrentes produziram **28 entregas** — 16 notificações duplicadas |
+| D20 | Rate limit de IA por endereço, não por usuário | `UseRateLimiter` antes de `UseAuthentication` **e** leitura da claim `sub`, que o handler de bearer mapeia para `NameIdentifier` | O segundo usuário autenticado recebia **429** sem ter gasto nada |
+
+### 13.2 Uma premissa que estava incompleta
+
+A revisão atribuía o problema do rate limit apenas à ordem do middleware. Está certo, mas
+não basta: com a ordem já corrigida e a leitura da claim intacta, o teste **continua
+falhando**. O handler de bearer mapeia `sub` para `ClaimTypes.NameIdentifier` por padrão,
+então procurar só por `sub` devolve vazio mesmo em requisição autenticada, e a partição cai
+no endereço de novo. Eram dois defeitos independentes; corrigir um só teria deixado o bug
+de pé com a aparência de resolvido.
+
+Também vale registrar o que **não** foi feito. A instrução conservadora era restringir
+projetos e resultados a Manager e Leadership caso a especificação não exigisse acesso do
+Operator. A especificação exige: a matriz de papéis em
+`docs/specs/2026-05-13-flow-mvp-design.md` diz `GET /projects` → "Operator (own)". Então
+implementei o "own" de forma explícita — o operador acessa o projeto quando é o responsável
+ou quando o projeto veio de uma ideia que ele enviou — em vez de fechar o acesso e
+contrariar a especificação.
+
+### 13.3 O que passou a existir
+
+| Área | Mudança |
+|---|---|
+| AUTHZ | `ResourceAccessPolicy` na Application, um lugar só para a regra; listagem restringida **na consulta**, não filtrada depois |
+| AUTH | `TryConsumeAsync` e `TryRevokeAsync` com compare-and-set; emissão do substituto dentro da mesma transação, que aborta se a corrida for perdida |
+| PUSH | `DeliveryId` (o `_id` do outbox) como `idempotency_key`; resposta do provedor interpretada em vez de presumida |
+| OUTBOX | Estado `Processing` com lease, claim atômico por `findOneAndUpdate`, retomada de lease vencido, índice `ix_outbox_lease` |
+| API | Pipeline reordenado; `UserIdentity` como leitura única do id do usuário |
+
+### 13.4 Testes acrescentados
+
+| Arquivo | Testes | Cobre |
+|---|---|---|
+| `ResourceAuthorizationTests` | 15 | IDOR em ideia, comentários, projeto, linha do tempo, snapshots, resultado e listagem; caminho positivo do operador; acesso integral de Manager e Leadership; anônimo em 401 |
+| `RefreshTokenConcurrencyTests` | 8 | Doze consumos simultâneos com um vencedor só; a corrida por HTTP em cinco rodadas conferindo o banco; cadeia morrendo; rotação sequencial; logout não revogando token alheio |
+| `OneSignalSenderTests` | 20 | Chave de idempotência, reuso em retentativa, chaves distintas, entrega comprovada, falso positivo, classificação de falha, chave da API fora do corpo |
+| `OutboxConcurrencyTests` | 9 | Duas e quatro réplicas concorrentes, lease vivo e vencido, retomada, transitório, permanente, dead-letter, sem credencial |
+| `RateLimitPartitioningTests` | 8 | Cotas separadas por usuário no mesmo endereço, mesmo usuário ainda limitado, dois aparelhos dividindo cota, `/auth/*` por endereço, 401 e 403 intactos |
+
+**60 testes novos.** Suíte: **273** (124 Domain + 10 Application + 139 Integration), 0 falhas,
+0 ignorados. Build em Release sem avisos.
+
+### 13.5 Fumaça contra o binário publicado
+
+18 verificações contra a API em Release com o dataset de demonstração: 403 em cada porta de
+recurso alheio, 200 na própria trilha, 401 anônimo, rotação e reuso de refresh token,
+degradação do assistente com `userMessage` em pt-BR, e o painel executivo intacto.
+
+---
+
 ## 12. Histórico de atualização
 
 | Data | Fase | Alteração |
@@ -795,3 +860,4 @@ Nenhuma delas depende de código que falte escrever.
 | 09/09/2026 | Fase 2 | Copiloto do gestor, rascunho de projeto, insights executivos, governança em `assistant_runs`, central de notificações, outbox com retry e dead-letter. |
 | 09/09/2026 | Fase 3 | Aplicativo mobile reconstruído: 23 telas em pt-BR, cliente tipado, refresh single-flight, gráficos, `expo-doctor` 18/18. |
 | 09/09/2026 | Fase 4 | CORS, rate limiting, Serilog, OpenTelemetry, health checks, métricas de negócio ligadas de fato, Docker, compose, artefatos, README e os nove documentos. Suíte final de **213 testes**. |
+| 09/09/2026 | Revisão | Cinco correções de segurança e concorrência (seção 13): IDOR, rotação atômica de refresh token, idempotência do push, claim atômico do outbox e rate limit por usuário. 60 testes novos; suíte de **273**. |

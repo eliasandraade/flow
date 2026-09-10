@@ -317,9 +317,9 @@ dotnet test
 ```text
 Flow.Domain.Tests          124   invariantes, máquinas de estado, FlowScore
 Flow.Application.Tests      10   aritmética do dashboard nos casos de borda
-Flow.Integration.Tests      79   MongoDB real, transações reais, API ponta a ponta
+Flow.Integration.Tests     139   MongoDB real, transações reais, API ponta a ponta
 ─────────────────────────────
-Total                      213
+Total                      273
 ```
 
 Os testes de integração usam um **MongoDB real e descartável**. Se `FLOW_TEST_MONGO_URI`
