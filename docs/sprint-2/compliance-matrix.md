@@ -12,11 +12,12 @@ auditoria inicial do código até a evidência final de verificação.
 ### Estado no fechamento
 
 - **Build:** `dotnet build Flow.sln` — 0 erros, **0 avisos**
-- **Testes:** **273** (124 Domain + 10 Application + 139 Integration contra MongoDB real), 0 falhas
+- **Testes:** **313** (124 Domain + 10 Application + 9 Architecture + 170 Integration contra MongoDB real), 0 falhas
 - **API:** 54 endpoints, `openapi.json` exportado da própria aplicação
 - **Mobile:** 23 telas, `tsc --noEmit` limpo, `expo-doctor` 18/18, bundle Android gerado
 - **Compliance:** **110 de 113** requisitos `VERIFIED` — ver [seção 10](#10-estado-final-por-área)
-- **Pendências:** 3, todas por credencial ou ambiente externo — ver [seção 11](#11-pendências-reais)
+- **Pendências:** 2, ambas por credencial externa — ver [seção 11](#11-pendências-reais)
+- **CI:** `.github/workflows/ci.yml`, quatro jobs — ver [seção 14.5](#145-ci)
 
 > As seções 1 a 5 registram a auditoria e o plano do início da Sprint, e são mantidas como
 > estavam: elas são o ponto de partida contra o qual o resultado é comparado. O estado
@@ -771,7 +772,7 @@ Nenhuma delas depende de código que falte escrever.
 |---|---|---|---|
 | APK-03 | Build do APK | Credencial EAS com assinatura Android | `cd mobile && eas build --platform android --profile preview` |
 | APK-04 | Instalação em aparelho | Depende de APK-03 | Instalar o `.apk` e percorrer o roteiro de demonstração |
-| DEL-05 | Imagem Docker e deploy com HTTPS | Docker Desktop não inicia nesta máquina; sem credencial Dokploy | `docker compose build && docker compose up -d`; publicar e associar o domínio |
+| DEL-05 | Deploy com HTTPS no Dokploy | Sem credencial Dokploy | Publicar e associar o domínio. **A imagem e o compose passaram a ser construídos e executados na CI**, então o que resta é só o deploy. |
 
 ### Itens que dependem só de chave, já implementados e testados por contrato
 
@@ -851,6 +852,79 @@ degradação do assistente com `userMessage` em pt-BR, e o painel executivo inta
 
 ---
 
+## 14. Segunda rodada de hardening
+
+Cinco problemas de uma segunda revisão independente, mais duas melhorias de infraestrutura.
+Mesmo método: escrever o teste, rodar contra o código publicado, ver falhar, corrigir.
+
+### 14.1 O que estava errado
+
+| # | Problema | Causa raiz | Evidência antes da correção |
+|---|---|---|---|
+| D21 | Erro transitório do Mongo lido como reuso de token | `TryConsumeAsync` capturava `TransientTransactionError` e devolvia `false`, que o handler interpreta como token já consumido | Com o erro nascendo onde o `catch` vivia, uma **primeira rotação legítima voltou 401** e a cadeia foi revogada — um step-down deslogaria o usuário de todas as sessões |
+| D22 | Transação sem semântica de retry | `StartTransaction`/`CommitTransactionAsync` na mão, sem retry da transação em `TransientTransactionError` nem retry só do commit em `UnknownTransactionCommitResult` | 5 de 7 testes falharam com **500**: nenhuma retentativa acontecia |
+| D23 | Forwarded headers não processados | Pipeline sem `UseForwardedHeaders`, e o padrão do framework só confia em loopback | O app via **o endereço do proxy para todo mundo**; um segundo cliente atrás do mesmo Traefik recebeu **429** por algo que nunca fez, e `X-Forwarded-Proto: https` não movia `Request.Scheme` |
+| D24 | `errors` do OneSignal modelado como `List<string>` | O campo é polimórfico: array quando nada foi criado, objeto quando a mensagem **foi** criada e alguns destinatários foram pulados | `{"id":"uuid","errors":{...}}` fazia o parse lançar, o corpo virava "ilegível" e uma **mensagem criada era classificada como falha transitória** e reagendada |
+| D25 | Conclusão do outbox sem fencing | A escrita pós-claim era endereçada só pelo `_id` | A escrita do worker com lease vencido foi **aceita**, e um `MarkFailed` obsoleto sobrescreveu o `Dispatched` de quem entregou |
+
+### 14.2 Decisões de implementação
+
+**Transações.** Migrei `MongoUnitOfWork` para `WithTransactionAsync`, do próprio driver, em
+vez de reimplementar os dois laços de retentativa. A API oficial já implementa as duas
+regras, elas são sutis, e o fornecedor mantém. O callback pode rodar mais de uma vez — é o
+sentido da regra transitória — e isso é seguro porque tudo lá dentro escreve pela sessão;
+o que precisa acontecer uma vez só já estava fora da transação. Declarei read e write
+concern `majority` explicitamente: a auditoria é a evidência do produto, e um commit
+reconhecido por uma minoria some numa eleição.
+
+`TryConsumeAsync` deixou de capturar qualquer erro. `false` significa uma coisa só: nenhum
+documento correspondeu. Falha de infraestrutura sobe como falha de infraestrutura.
+
+**Proxy.** A configuração é uma lista de proxies e redes confiáveis, não um interruptor.
+Limpar `KnownProxies` e `KnownNetworks` faria funcionar e transformaria um cabeçalho
+controlado pelo cliente na identidade do cliente — qualquer um escolheria o próprio
+endereço para escapar do rate limit. A API **recusa iniciar** fora de Development se a
+opção estiver ligada sem nada confiável declarado.
+
+**Fencing.** Cada claim cunha um `leaseToken` novo, e toda mutação pós-claim exige
+`_id` + `Processing` + esse token. O token é por claim e não por worker porque o mesmo
+worker pode ter dois claims da mesma mensagem em momentos diferentes, e uma escrita do
+primeiro casaria pelo nome. Como transação Mongo e requisição HTTP externa não podem ser
+atômicas juntas, a defesa continua em duas camadas: o fencing impede a sobrescrita, a chave
+de idempotência impede a duplicata.
+
+### 14.3 O que não deu para testar como pedido
+
+`UnknownTransactionCommitResult` pede que o commit seja retentado sem reexecutar a
+operação. Isso agora é implementação do driver, não nossa — é justamente por isso que
+migrei para a API oficial. Não escrevi teste para ele: exigiria interceptar o commit por
+dentro da sessão, e o que estaria sendo testado seria o MongoDB, não o Flow. O que testei é
+o que controlo: erro transitório reexecutando o callback e comitando o trabalho **uma vez
+só**.
+
+### 14.4 Testes acrescentados
+
+| Arquivo | Testes | Cobre |
+|---|---|---|
+| `TransactionRetrySemanticsTests` | 7 | Transitório retentado sem virar reuso; transação retentada comitando uma vez; três transitórios absorvidos; falha não transitória em 500 sem revogar; CAS perdido ainda revogando; o contraste lado a lado; retry de um UnitOfWork qualquer |
+| `ForwardedHeadersTests` | 13 | Proxy confiável reportando endereço e esquema; proxy por endereço exato; cliente direto não forjando nada; feature desligada; cadeia de saltos; baldes separados por cliente; IA ainda por usuário; 401 e 403 intactos; configuração recusando CIDR inválido e recusando ficar ligada sem ninguém confiável |
+| `OneSignalSenderTests` | +4 | `id` válido com `errors` objeto ainda sendo entrega; objeto sem `id` não quebrando o parse; resposta sem campo `id`; resumo citando chave e contagem sem citar identificadores |
+| `OutboxLeaseFencingTests` | 7 | Worker sem lease não sobrescrevendo quem assumiu; mesmo worker não reusando token antigo; token já limpo recusado; conclusão, falha e liberação com lease válido; chave de idempotência sobrevivendo à retomada |
+| `LayerBoundaryTests` | 9 | Domain sem Application/Infrastructure/API; Application sem Infrastructure/API; nenhum dos dois com o driver do Mongo; nenhuma assinatura da Application com `IClientSessionHandle`, inclusive dentro de genéricos; e a asserção espelho de que a Infrastructure **tem** o driver |
+
+**40 testes novos.** Suíte: **313** (124 Domain + 10 Application + 9 Architecture + 170
+Integration), 0 falhas, 0 ignorados. Build em Release sem avisos.
+
+### 14.5 CI
+
+`.github/workflows/ci.yml`, com `permissions: contents: read`, sem `pull_request_target` e
+sem segredo. Quatro jobs: backend com a suíte contra MongoDB real e um passo que falha se
+algum teste for pulado; mobile com typecheck, doctor e export Android; **Docker construindo
+a imagem e subindo o compose**, que é a primeira validação real do `Dockerfile`; e
+artefatos conferindo o `openapi.json` exportado da aplicação.
+
+---
+
 ## 12. Histórico de atualização
 
 | Data | Fase | Alteração |
@@ -861,3 +935,4 @@ degradação do assistente com `userMessage` em pt-BR, e o painel executivo inta
 | 09/09/2026 | Fase 3 | Aplicativo mobile reconstruído: 23 telas em pt-BR, cliente tipado, refresh single-flight, gráficos, `expo-doctor` 18/18. |
 | 09/09/2026 | Fase 4 | CORS, rate limiting, Serilog, OpenTelemetry, health checks, métricas de negócio ligadas de fato, Docker, compose, artefatos, README e os nove documentos. Suíte final de **213 testes**. |
 | 09/09/2026 | Revisão | Cinco correções de segurança e concorrência (seção 13): IDOR, rotação atômica de refresh token, idempotência do push, claim atômico do outbox e rate limit por usuário. 60 testes novos; suíte de **273**. |
+| 10/09/2026 | Hardening 2 | Semântica de retry das transações, forwarded headers atrás do Traefik, contrato real do OneSignal, fencing de lease no outbox, guardas de arquitetura e CI no GitHub Actions. 40 testes novos; suíte de **313**. |

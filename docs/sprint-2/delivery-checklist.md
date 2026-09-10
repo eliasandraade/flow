@@ -5,7 +5,7 @@ Estado real de cada item, verificado contra o código e a execução, não contr
 - **Branch:** `sprint-2`
 - **Base:** `ff00816` (`master`)
 - **Build:** `dotnet build Flow.sln` — 0 erros, 0 avisos
-- **Testes:** 273, todos verdes
+- **Testes:** 313, todos verdes
 - **Mobile:** `tsc --noEmit` limpo, `expo-doctor` 18/18, bundle Android gerado
 
 Legenda: ✅ verificado em execução · ⏳ pendente de credencial ou ambiente
@@ -28,7 +28,7 @@ Legenda: ✅ verificado em execução · ⏳ pendente de credencial ou ambiente
 | Progresso e resultados | ✅ | Operação dedicada + estimado/realizado |
 | Dashboard | ✅ | 1 endpoint, ~40 métricas, datasets prontos |
 | Integração real com o mobile | ✅ | REST, sem mocks |
-| APIs funcionais sem mock | ✅ | 139 testes de integração contra Mongo real |
+| APIs funcionais sem mock | ✅ | 170 testes de integração contra Mongo real |
 | MongoDB ou outro NoSQL | ✅ | MongoDB 8.0, driver oficial 3.11.1 |
 | Serviços externos | ✅ | Gemini e OneSignal implementados |
 | Auditoria | ✅ | Append-only, transacional |
@@ -158,9 +158,10 @@ Legenda: ✅ verificado em execução · ⏳ pendente de credencial ou ambiente
 ```text
 Flow.Domain.Tests          124   invariantes, máquinas de estado, FlowScore
 Flow.Application.Tests      10   aritmética do dashboard nos casos de borda
-Flow.Integration.Tests     139   MongoDB real, transações reais, API ponta a ponta
+Flow.Architecture.Tests      9   fronteiras entre as camadas
+Flow.Integration.Tests     170   MongoDB real, transações reais, API ponta a ponta
 ─────────────────────────────
-Total                      273   0 falhas
+Total                      313   0 falhas
 ```
 
 | Área exigida | Cobertura |
@@ -189,7 +190,7 @@ Total                      273   0 falhas
 | `eas.json` com profile APK | ✅ |
 | 10 documentos em `docs/sprint-2/` | ✅ os 9 exigidos + `flowscore.md` |
 | README atualizado | ✅ |
-| **Build da imagem Docker** | ⏳ Docker Desktop não sobe nesta máquina |
+| Build da imagem Docker | ✅ construída e executada na CI |
 | **Deploy HTTPS no Dokploy** | ⏳ falta credencial |
 
 ---
@@ -213,7 +214,7 @@ fica em `Stopped` e `docker desktop status` trava. Foram tentadas inicializaçã
 `docker desktop start` e restart completo com `wsl --shutdown`.
 
 Isso não bloqueou o trabalho: em vez de esperar, subi um **MongoDB 8.0.30 real em replica
-set de nó único**, e é contra ele que os 139 testes de integração rodam — com transações
+set de nó único**, e é contra ele que os 170 testes de integração rodam — com transações
 reais, commit e abort verificados. O fixture aceita `FLOW_TEST_MONGO_URI` justamente para
 isso, e cai em Testcontainers onde houver um daemon.
 
@@ -225,7 +226,7 @@ isso, e cai em Testcontainers onde houver um daemon.
 # backend
 dotnet build Flow.sln                 # 0 erros, 0 avisos
 export FLOW_TEST_MONGO_URI="mongodb://127.0.0.1:27017/?replicaSet=rs0"
-dotnet test Flow.sln                  # 273 testes
+dotnet test Flow.sln                  # 313 testes
 
 # mobile
 cd mobile
