@@ -7,6 +7,11 @@
 #
 #   docker compose up -d
 #   docker compose logs -f api
+#
+# The environment block below is also where the flat names in .env are translated into
+# the hierarchical names the application binds (JWT_SECRET_KEY -> JwtSettings__SecretKey,
+# and so on). That translation exists only here: running the API without Compose means
+# supplying the hierarchical names directly, or using appsettings or user secrets.
 
 name: flow
 

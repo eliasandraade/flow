@@ -176,9 +176,20 @@ cp .env.example .env
 
 ### Variáveis
 
-Os nomes planos abaixo são os do `.env`, consumidos pelo `docker-compose.yml`. Ao rodar a
-API direto com `dotnet run`, ou em um PaaS que injeta variáveis no container, use os nomes
-hierárquicos da coluna à direita.
+Existem duas grafias para a mesma configuração, e vale saber qual usar em cada caso.
+
+**Com Docker Compose:** use os nomes planos da coluna à esquerda, no `.env`. Um arquivo
+`.env` é um formato plano, e é o `docker-compose.yml` que traduz cada nome para o
+hierárquico que a aplicação realmente vincula — `JWT_SECRET_KEY` vira
+`JwtSettings__SecretKey`, e assim por diante.
+
+**Sem Compose** — `dotnet run`, um PaaS que injeta variáveis direto no container, um
+orquestrador — essa tradução não acontece. Ali valem `appsettings.json`,
+`dotnet user-secrets` para desenvolvimento local, ou as variáveis hierárquicas com `__`
+da coluna à direita. Segredo não entra em `appsettings.json` em nenhuma hipótese.
+
+Três nomes são planos nos dois mundos, porque a aplicação os lê planos:
+`CORS_ALLOWED_ORIGINS`, `SEED_DEMO_DATA` e `SEED_DEMO_PASSWORD`.
 
 | `.env` (compose) | Variável da aplicação | Obrigatória |
 |---|---|---|
