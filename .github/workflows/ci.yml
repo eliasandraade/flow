@@ -260,6 +260,21 @@ jobs:
     timeout-minutes: 25
     needs: backend
 
+    # The specification is exported from the running application rather than from a copy
+    # kept by hand, and the application does not start without a database: it seeds the
+    # Identity roles before serving anything. A standalone server is enough here — nothing
+    # on the startup path opens a transaction, so no replica set is needed.
+    services:
+      mongo:
+        image: mongo:8.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v4
 
@@ -285,6 +300,8 @@ jobs:
       - name: Build the delivery artefacts
         env:
           FLOW_SKIP_TESTS: '1'
+          Mongo__ConnectionString: mongodb://localhost:27017
+          Mongo__Database: flow_openapi_export
         run: ./scripts/build-artifacts.sh
 
       # The specification is exported from the running application rather than from a copy

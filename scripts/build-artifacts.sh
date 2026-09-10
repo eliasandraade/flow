@@ -48,16 +48,23 @@ echo "==> Exporting openapi.json"
 
 # The specification is generated from the running application, so it reflects the
 # real route table rather than a hand-maintained copy.
+#
+# That means a database is required, and not only for the health endpoint: startup seeds
+# the Identity roles before serving anything, and aborts if it cannot reach MongoDB. An
+# earlier version of this script claimed /swagger was served regardless. It is not, and
+# the claim went unnoticed because the machine it was written on happened to have MongoDB
+# running. Point Mongo__ConnectionString at whatever is available; a standalone server is
+# enough here, since nothing on this path opens a transaction.
 ASPNETCORE_ENVIRONMENT=Development \
 ASPNETCORE_URLS=http://localhost:5199 \
 Swagger__Enabled=true \
 Mongo__EnsureIndexes=false \
+Mongo__ConnectionString="${Mongo__ConnectionString:-mongodb://localhost:27017/?replicaSet=rs0}" \
+Mongo__Database="${Mongo__Database:-flow_openapi_export}" \
 JwtSettings__SecretKey="openapi-export-only-not-a-real-secret-32b" \
-dotnet "$STAGE/api/Flow.API.dll" &
+dotnet "$STAGE/api/Flow.API.dll" > "$STAGE/openapi-export.log" 2>&1 &
 API_PID=$!
 
-# The API needs Mongo to reach "ready", but /swagger is served regardless, so this
-# waits on the specification itself rather than on health.
 for _ in $(seq 1 40); do
   if curl -fsS "http://localhost:5199/swagger/v1/swagger.json" \
       -o "$DIST/presentation-assets/openapi.json" 2>/dev/null; then
@@ -70,8 +77,14 @@ done
 kill "$API_PID" 2>/dev/null || true
 wait "$API_PID" 2>/dev/null || true
 
+# A warning here used to be enough, which meant the script could finish "successfully"
+# having produced a dist/ with no specification in it. Failing is the honest outcome: the
+# specification is a deliverable, not a nice-to-have.
 if [ ! -s "$DIST/presentation-assets/openapi.json" ]; then
-  echo "    WARNING: openapi.json could not be exported (is the API able to start?)" >&2
+  echo "    ERROR: openapi.json could not be exported. The API did not start." >&2
+  echo "    Last lines of its output:" >&2
+  tail -n 20 "$STAGE/openapi-export.log" >&2 || true
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------
