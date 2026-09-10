@@ -17,15 +17,27 @@ public sealed class CircuitBreaker
 {
     private readonly GeminiOptions _options;
     private readonly ILogger<CircuitBreaker> _logger;
+    private readonly TimeProvider _time;
     private readonly object _gate = new();
 
     private int _consecutiveFailures;
     private DateTimeOffset? _openedAt;
 
-    public CircuitBreaker(IOptions<GeminiOptions> options, ILogger<CircuitBreaker> logger)
+    /// <summary>
+    /// The clock is injected so the cooldown can be tested by moving time rather than by
+    /// waiting for it. Reading DateTimeOffset.UtcNow directly forced the tests to use
+    /// windows of a few dozen milliseconds and hope the machine kept up; on a shared CI
+    /// runner it did not, and a correct breaker reported a failure that was really a
+    /// scheduling delay.
+    /// </summary>
+    public CircuitBreaker(
+        IOptions<GeminiOptions> options,
+        ILogger<CircuitBreaker> logger,
+        TimeProvider? timeProvider = null)
     {
         _options = options.Value;
         _logger = logger;
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     public bool IsOpen
@@ -42,7 +54,7 @@ public sealed class CircuitBreaker
         {
             if (_openedAt is null) return true;
 
-            if (DateTimeOffset.UtcNow - _openedAt.Value < _options.CircuitBreakerCooldown)
+            if (_time.GetUtcNow() - _openedAt.Value < _options.CircuitBreakerCooldown)
                 return false;
 
             // Cooldown elapsed: let exactly one request through to test the water.
@@ -70,7 +82,7 @@ public sealed class CircuitBreaker
 
             if (_consecutiveFailures < _options.CircuitBreakerFailureThreshold) return;
 
-            _openedAt = DateTimeOffset.UtcNow;
+            _openedAt = _time.GetUtcNow();
             _logger.LogWarning(
                 "Assistant circuit breaker opened after {Failures} consecutive failures. "
                 + "Calls will fail fast for {Cooldown}.",

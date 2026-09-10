@@ -13,6 +13,7 @@ using Flow.Infrastructure.Seeding;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using MongoDB.Driver;
 using MongoDB.Driver.Core.Extensions.DiagnosticSources;
 
@@ -54,6 +55,10 @@ public static class DependencyInjection
     private static IServiceCollection AddAssistant(
         this IServiceCollection services, IConfiguration configuration)
     {
+        // One clock for the whole application, so anything time-dependent can be tested by
+        // moving it instead of by waiting.
+        services.TryAddSingleton(TimeProvider.System);
+
         services.Configure<GeminiOptions>(configuration.GetSection(GeminiOptions.SectionName));
 
         // The breaker holds state across requests, so it has to outlive them.

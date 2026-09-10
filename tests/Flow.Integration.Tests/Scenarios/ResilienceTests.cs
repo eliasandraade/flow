@@ -19,17 +19,35 @@ namespace Flow.Integration.Tests.Scenarios;
 /// </summary>
 public class CircuitBreakerTests
 {
-    private static CircuitBreaker Create(int threshold = 3, int cooldownMs = 50) =>
-        new(Options.Create(new GeminiOptions
-        {
-            CircuitBreakerFailureThreshold = threshold,
-            CircuitBreakerCooldown = TimeSpan.FromMilliseconds(cooldownMs)
-        }), NullLogger<CircuitBreaker>.Instance);
+    /// <summary>
+    /// The cooldown is a whole minute and the clock is moved by hand.
+    ///
+    /// These tests used to run on wall-clock windows of a few dozen milliseconds and lost
+    /// the race on a loaded CI runner: the cooldown elapsed between opening the circuit and
+    /// asserting it was open, the breaker went half-open exactly as designed, and a correct
+    /// implementation reported a failure that was really a scheduling delay.
+    /// </summary>
+    private static (CircuitBreaker Breaker, TestTimeProvider Clock) Create(
+        int threshold = 3, TimeSpan? cooldown = null)
+    {
+        var clock = new TestTimeProvider();
+
+        var breaker = new CircuitBreaker(
+            Options.Create(new GeminiOptions
+            {
+                CircuitBreakerFailureThreshold = threshold,
+                CircuitBreakerCooldown = cooldown ?? TimeSpan.FromMinutes(1)
+            }),
+            NullLogger<CircuitBreaker>.Instance,
+            clock);
+
+        return (breaker, clock);
+    }
 
     [Fact]
     public void StaysClosedWhileCallsSucceed()
     {
-        var breaker = Create();
+        var (breaker, _) = Create();
 
         for (var i = 0; i < 10; i++)
         {
@@ -43,7 +61,7 @@ public class CircuitBreakerTests
     [Fact]
     public void OpensAfterConsecutiveFailures()
     {
-        var breaker = Create(threshold: 3);
+        var (breaker, _) = Create(threshold: 3);
 
         for (var i = 0; i < 3; i++) breaker.RecordFailure();
 
@@ -55,7 +73,7 @@ public class CircuitBreakerTests
     [Fact]
     public void ASuccessResetsTheFailureRun()
     {
-        var breaker = Create(threshold: 3);
+        var (breaker, _) = Create(threshold: 3);
 
         breaker.RecordFailure();
         breaker.RecordFailure();
@@ -67,15 +85,15 @@ public class CircuitBreakerTests
     }
 
     [Fact]
-    public async Task AfterTheCooldown_OneTrialRequestIsAllowedThrough()
+    public void AfterTheCooldown_OneTrialRequestIsAllowedThrough()
     {
-        var breaker = Create(threshold: 2, cooldownMs: 40);
+        var (breaker, clock) = Create(threshold: 2);
 
         breaker.RecordFailure();
         breaker.RecordFailure();
         breaker.AllowRequest().Should().BeFalse();
 
-        await Task.Delay(80);
+        clock.Advance(TimeSpan.FromMinutes(2));
 
         breaker.AllowRequest().Should().BeTrue(because: "the circuit goes half-open");
 
@@ -85,13 +103,13 @@ public class CircuitBreakerTests
     }
 
     [Fact]
-    public async Task ARecoveredProviderClosesTheCircuit()
+    public void ARecoveredProviderClosesTheCircuit()
     {
-        var breaker = Create(threshold: 2, cooldownMs: 40);
+        var (breaker, clock) = Create(threshold: 2);
 
         breaker.RecordFailure();
         breaker.RecordFailure();
-        await Task.Delay(80);
+        clock.Advance(TimeSpan.FromMinutes(2));
 
         breaker.AllowRequest().Should().BeTrue();
         breaker.RecordSuccess();
