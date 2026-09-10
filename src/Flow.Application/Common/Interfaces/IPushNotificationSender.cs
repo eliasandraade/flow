@@ -16,12 +16,27 @@ public interface IPushNotificationSender
         PushNotificationRequest request, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// One delivery attempt, carrying two different idempotency keys on purpose.
+///
+/// <paramref name="DedupeKey"/> is ours, shaped for our own storage: readable, meaningful
+/// and unique per business event — "IdeaApproved:{ideaId}:{userId}". A unique index on it
+/// turns a reprocessed event into a failed insert instead of a duplicate notification. It
+/// is deliberately not what goes to the provider: it is not a UUID, and a provider that
+/// requires one would reject or ignore it.
+///
+/// <paramref name="DeliveryId"/> is the provider's, and is the outbox message id. It has to
+/// be stable across retries — that is the entire point of an idempotency key — so it is
+/// carried in rather than generated here. Generating one per attempt would make every retry
+/// look like a new message and defeat the deduplication it was asked for.
+/// </summary>
 public sealed record PushNotificationRequest(
     Guid UserId,
     string Title,
     string Body,
     string? DeepLink,
-    string DedupeKey);
+    string DedupeKey,
+    Guid DeliveryId);
 
 public enum PushDeliveryOutcome
 {

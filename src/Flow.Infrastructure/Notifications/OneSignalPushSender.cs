@@ -15,7 +15,8 @@ namespace Flow.Infrastructure.Notifications;
 /// after login. E-mail is never used as an identifier: it is neither stable nor an
 /// authorisation claim.
 ///
-/// The REST API key lives only here, on the server. It is never shipped to the app.
+/// The REST API key lives only here, on the server. It is never shipped to the app, and it
+/// never reaches a log line.
 /// </summary>
 public sealed class OneSignalPushSender : IPushNotificationSender
 {
@@ -53,8 +54,12 @@ public sealed class OneSignalPushSender : IPushNotificationSender
             Data = request.DeepLink is null
                 ? null
                 : new Dictionary<string, string> { ["deepLink"] = request.DeepLink },
-            // Lets OneSignal collapse a repeat of the same event on its side too.
-            ExternalId = request.DedupeKey
+
+            // The provider requires an RFC 9562 UUID here and keeps it for 30 days, so the
+            // outbox message id is used verbatim: it is already a Guid, and it is the same
+            // value on every retry of the same message. Our own DedupeKey is not a UUID and
+            // does not belong in this field.
+            IdempotencyKey = request.DeliveryId.ToString()
         };
 
         try
@@ -70,10 +75,7 @@ public sealed class OneSignalPushSender : IPushNotificationSender
             using var response = await _httpClient.SendAsync(message, cancellationToken);
 
             if (response.IsSuccessStatusCode)
-            {
-                var body = await response.Content.ReadFromJsonAsync<OneSignalResponse>(cancellationToken);
-                return PushDeliveryResult.Delivered(body?.Id);
-            }
+                return await InterpretSuccessAsync(response, request, cancellationToken);
 
             var detail = await SafeReadAsync(response, cancellationToken);
 
@@ -93,10 +95,63 @@ public sealed class OneSignalPushSender : IPushNotificationSender
         }
         catch (Exception ex)
         {
-            // The API key must never reach a log line.
+            // Logged without the request, which carries the Authorization header.
             _logger.LogError(ex, "Unexpected failure dispatching a push notification.");
             return PushDeliveryResult.Transient("Unexpected provider failure.");
         }
+    }
+
+    /// <summary>
+    /// A 2xx from this endpoint does not mean a notification exists.
+    ///
+    /// The provider answers 200 for any request it accepted, and only returns an id when a
+    /// message was actually created; no id means it was not, typically because nobody in
+    /// the target audience has a live subscription. Treating every 2xx as delivered is how
+    /// an outbox ends up full of messages marked as sent that nobody ever received, which
+    /// is worse than a queue that is honestly stuck.
+    /// </summary>
+    private async Task<PushDeliveryResult> InterpretSuccessAsync(
+        HttpResponseMessage response,
+        PushNotificationRequest request,
+        CancellationToken cancellationToken)
+    {
+        OneSignalResponse? body;
+
+        try
+        {
+            body = await response.Content.ReadFromJsonAsync<OneSignalResponse>(cancellationToken);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException
+            or HttpRequestException)
+        {
+            // Accepted, but the answer is unreadable, so there is no evidence a message
+            // was created. Retrying is safe because the delivery carries a stable
+            // idempotency key.
+            return PushDeliveryResult.Transient(
+                "The push provider answered with a body that could not be read.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(body?.Id))
+            return PushDeliveryResult.Delivered(body!.Id);
+
+        // The provider states why it created nothing. That is a fact about this recipient,
+        // not a blip, so retrying the same message would just repeat the same answer.
+        if (body?.Errors is { Count: > 0 })
+        {
+            _logger.LogWarning(
+                "Push provider accepted the request for outbox message {DeliveryId} but created "
+                + "no message: {Reason}",
+                request.DeliveryId, string.Join("; ", body.Errors));
+
+            return PushDeliveryResult.Permanent(
+                $"Provider created no message: {string.Join("; ", body.Errors)}");
+        }
+
+        // Accepted, no id, no reason. Ambiguous, and one more attempt is safe precisely
+        // because the delivery carries a stable idempotency key: if a message was in fact
+        // created, the retry returns the original result instead of duplicating it.
+        return PushDeliveryResult.Transient(
+            "Provider returned success without a message id and without a reason.");
     }
 
     private static bool IsTransient(HttpStatusCode status) =>
@@ -133,7 +188,7 @@ public sealed class OneSignalPushSender : IPushNotificationSender
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public Dictionary<string, string>? Data { get; init; }
 
-        [JsonPropertyName("external_id")] public string ExternalId { get; init; } = string.Empty;
+        [JsonPropertyName("idempotency_key")] public string IdempotencyKey { get; init; } = string.Empty;
     }
 
     private sealed class AliasTargets
@@ -144,5 +199,6 @@ public sealed class OneSignalPushSender : IPushNotificationSender
     private sealed class OneSignalResponse
     {
         [JsonPropertyName("id")] public string? Id { get; init; }
+        [JsonPropertyName("errors")] public List<string>? Errors { get; init; }
     }
 }

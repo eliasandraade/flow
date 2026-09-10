@@ -105,7 +105,11 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
 
             var result = await sender.SendAsync(
                 new PushNotificationRequest(
-                    message.UserId, message.Title, message.Body, message.DeepLink, message.DedupeKey),
+                    message.UserId, message.Title, message.Body, message.DeepLink,
+                    DedupeKey: message.DedupeKey,
+                    // Stable across every retry of this message, which is what makes the
+                    // provider-side deduplication work at all.
+                    DeliveryId: message.Id),
                 cancellationToken);
 
             switch (result.Outcome)

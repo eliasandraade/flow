@@ -236,7 +236,7 @@ inserção em vez de gerar push duplicado.
 | Dependência | Timeout | Retry | Circuit breaker | Degradação |
 |---|---|---|---|---|
 | Gemini | sim | **não** (POST não idempotente) | sim | Erro tratado; núcleo do produto segue funcionando; FlowScore não depende do modelo. |
-| OneSignal | sim | sim, com backoff e jitter (despacho é idempotente por `dedupeKey`) | sim | Outbox registra a tentativa e retenta depois. |
+| OneSignal | sim | sim, com backoff e jitter (idempotente dos dois lados: `dedupeKey` aqui, `idempotency_key` lá) | sim | Outbox registra a tentativa e retenta depois. |
 | MongoDB | sim | retry do próprio driver | — | Falha reportada em `/health/ready`. |
 
 Retry cego em POST não idempotente é explicitamente evitado: repetir uma geração já

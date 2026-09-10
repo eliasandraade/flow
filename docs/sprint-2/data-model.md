@@ -456,6 +456,13 @@ Gravada na **mesma transação** do domínio; despachada fora dela por um `Hoste
 | `ix_outbox_dispatch` | `{ status: 1, nextAttemptAt: 1 }` | C |
 | `ux_outbox_dedupe` | `{ dedupeKey: 1 }` | U |
 
+> **Duas chaves de idempotência, de propósito.** `dedupeKey` é nossa, moldada para o nosso
+> armazenamento: legível, com significado, única por evento de negócio. Já o provedor de
+> push exige um UUID RFC 9562 na chave dele, e `IdeaApproved:{ideaId}:{userId}` não é um.
+> Então o que viaja como `idempotency_key` é o `_id` da mensagem de outbox — já é Guid e é
+> o mesmo valor em toda retentativa da mesma mensagem, que é o único jeito de a
+> deduplicação do provedor funcionar.
+>
 > O índice único em `dedupeKey` é a garantia de idempotência: um reprocesso do mesmo
 > evento falha na inserção em vez de gerar push duplicado.
 
