@@ -91,7 +91,22 @@ FluentValidation é pt-BR e os rótulos vêm de `FieldLabels`.
 | `Leadership` | Define estratégia e acompanha o resultado |
 
 Autorização por papel é aplicada na borda HTTP. Autorização **por recurso** é aplicada no
-handler: um Operator não lê nem edita a ideia de outro, mesmo tendo o papel correto.
+handler, por uma policy única — `ResourceAccessPolicy`, na camada Application.
+
+A regra, vinda da matriz de papéis da especificação:
+
+| Papel | O que enxerga |
+|---|---|
+| `Manager`, `Leadership` | O programa inteiro. Avaliar e conduzir é a razão de existir dos papéis. |
+| `Operator` | Só a própria trilha: as ideias que enviou, e os projetos e resultados que nasceram delas. |
+
+"Trilha do Operator" é literal: ele acessa um projeto quando é o responsável **ou** quando o
+projeto veio de uma ideia que ele enviou (`sourceIdeaId`). A listagem é **restringida na
+consulta**, não filtrada depois — filtrar depois faria a paginação revelar quantos
+documentos foram escondidos.
+
+Saber o GUID nunca basta. `ResourceAuthorizationTests` cobre cada porta: ideia, comentários,
+projeto, linha do tempo, snapshots, resultado financeiro e listagem.
 
 ---
 
@@ -176,7 +191,7 @@ prioridades passadas.
 | PATCH | `/ideas/{id}/priority` | Manager | Rótulo qualitativo |
 | PATCH | `/ideas/{id}/score` | Manager | Nota manual 0..100 |
 | PUT | `/ideas/{id}/flow-score` | Manager | Componentes; o total é calculado |
-| GET | `/ideas/{id}/comments` | autenticado | |
+| GET | `/ideas/{id}/comments` | autenticado | 403 para ideia de outro Operator |
 | POST | `/ideas/{id}/comments` | Manager, Leadership | |
 | POST | `/ideas/compare` | Manager, Leadership | 2 a 5 ideias, sem IA |
 
@@ -215,22 +230,22 @@ consegue injetar um número arbitrário. Fórmula em [`flowscore.md`](flowscore.
 
 ## 5. Projetos
 
-| Método | Rota | Papel |
-|---|---|---|
-| GET | `/projects` | autenticado |
-| POST | `/projects` | Manager |
-| POST | `/ideas/{ideaId}/convert` | Manager |
-| GET | `/projects/{id}` | autenticado |
-| PUT | `/projects/{id}` | Manager |
-| PATCH | `/projects/{id}/progress` | Manager |
-| PATCH | `/projects/{id}/stage` | Manager |
-| POST | `/projects/{id}/start` | Manager |
-| POST | `/projects/{id}/complete` | Manager |
-| POST | `/projects/{id}/block` | Manager |
-| POST | `/projects/{id}/unblock` | Manager |
-| POST | `/projects/{id}/cancel` | Manager |
-| GET | `/projects/{id}/timeline` | autenticado |
-| GET | `/projects/{id}/snapshots` | Manager, Leadership |
+| Método | Rota | Papel | Observação |
+|---|---|---|---|
+| GET | `/projects` | autenticado | Operator só vê o que é dele |
+| POST | `/projects` | Manager | |
+| POST | `/ideas/{ideaId}/convert` | Manager | |
+| GET | `/projects/{id}` | autenticado | 403 para projeto que não é do Operator |
+| PUT | `/projects/{id}` | Manager | |
+| PATCH | `/projects/{id}/progress` | Manager | |
+| PATCH | `/projects/{id}/stage` | Manager | |
+| POST | `/projects/{id}/start` | Manager | |
+| POST | `/projects/{id}/complete` | Manager | |
+| POST | `/projects/{id}/block` | Manager | |
+| POST | `/projects/{id}/unblock` | Manager | |
+| POST | `/projects/{id}/cancel` | Manager | |
+| GET | `/projects/{id}/timeline` | autenticado | Mesma regra do projeto |
+| GET | `/projects/{id}/snapshots` | Manager, Leadership | |
 
 Filtros em `GET /projects`: `ownerId`, `status`, `stage`, `linkedGuidelineId`, `skip`, `take`.
 
@@ -258,10 +273,10 @@ Um projeto `Blocked` mantém a etapa que já havia alcançado.
 
 ## 6. Resultados
 
-| Método | Rota | Papel |
-|---|---|---|
-| GET | `/projects/{projectId}/result` | autenticado |
-| PUT | `/projects/{projectId}/result` | Manager |
+| Método | Rota | Papel | Observação |
+|---|---|---|---|
+| GET | `/projects/{projectId}/result` | autenticado | Mesma regra do projeto |
+| PUT | `/projects/{projectId}/result` | Manager | |
 
 Estimado e realizado são **grupos independentes**. Enviar apenas os campos de um grupo
 deixa o outro intacto — é o que impede uma projeção de virar silenciosamente um resultado

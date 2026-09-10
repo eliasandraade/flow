@@ -25,6 +25,15 @@ public sealed class MongoProjectRepository : MongoRepositoryBase<Project>, IProj
         if (filter.SourceIdeaId is { } ideaId)
             conditions.Add(Filter.Eq(x => x.SourceIdeaId, ideaId));
 
+        // Authorization scope, applied last and never widened by the caller's own filters:
+        // an operator sees the projects they own plus the ones their ideas produced.
+        if (filter.RestrictToOperator is { } scope)
+        {
+            conditions.Add(Filter.Or(
+                Filter.Eq(x => x.OwnerId, scope.OperatorId),
+                Filter.In(x => x.SourceIdeaId, scope.OwnIdeaIds.Cast<Guid?>())));
+        }
+
         var query = conditions.Count == 0 ? Filter.Empty : Filter.And(conditions);
 
         return await Find(query)

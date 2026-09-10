@@ -60,6 +60,12 @@ public sealed class MongoIdeaRepository : MongoRepositoryBase<Idea>, IIdeaReposi
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         (int)await CountAsync(Filter.Empty, cancellationToken);
 
+    public async Task<IReadOnlyList<Guid>> GetIdsSubmittedByAsync(
+        Guid userId, CancellationToken cancellationToken = default) =>
+        await Find(Filter.Eq(x => x.SubmittedBy, userId))
+            .Project(x => x.Id)
+            .ToListAsync(cancellationToken);
+
     public Task AddAsync(Idea idea, CancellationToken cancellationToken = default) =>
         InsertAsync(idea, cancellationToken);
 

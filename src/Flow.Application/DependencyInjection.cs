@@ -1,6 +1,7 @@
 using System.Globalization;
 using Flow.Application.Assistant;
 using Flow.Application.Auth;
+using Flow.Application.Common.Authorization;
 using Flow.Application.Common.Behaviors;
 using Flow.Application.Common.Validation;
 using Flow.Application.Common.Services;
@@ -27,6 +28,7 @@ public static class DependencyInjection
         services.AddValidatorsFromAssembly(assembly);
         services.AddTransient(typeof(MediatR.IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
+        services.AddScoped<ResourceAccessPolicy>();
         services.AddScoped<AuthTokenIssuer>();
         services.AddScoped<AuditTrail>();
         services.AddScoped<AssistantRunRecorder>();

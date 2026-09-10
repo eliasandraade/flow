@@ -30,6 +30,16 @@ public sealed record ProjectFilter
     public Guid? OwnerId { get; init; }
     public Guid? LinkedGuidelineId { get; init; }
     public Guid? SourceIdeaId { get; init; }
+
+    /// <summary>
+    /// Authorization scope, not a user-supplied filter: when set, the query may only return
+    /// projects this operator owns <b>or</b> that came from one of their own ideas.
+    ///
+    /// Unlike every other field here it composes as an OR internally, and it is applied on
+    /// top of whatever the caller asked for — a filter the caller cannot widen.
+    /// </summary>
+    public Authorization.OperatorProjectScope? RestrictToOperator { get; init; }
+
     public int Skip { get; init; }
     public int Take { get; init; } = 50;
 }
