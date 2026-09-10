@@ -95,4 +95,33 @@ public class CiWorkflowTests
         // a secret would fail there, or worse, be tempted into pull_request_target.
         Workflow.Should().NotContain("secrets.");
     }
+
+    // ─── Test results cannot collide ────────────────────────────────────────
+
+    [Fact]
+    public void EachTestProjectWritesAResultFileNamedAfterItself()
+    {
+        // LogFilePrefix appends a timestamp resolved to the second, so two projects that
+        // finish within the same second write the same file and the totals below it silently
+        // undercount. A name chosen per project cannot collide at all.
+        // Matching the logger argument rather than the bare word: the step's comment says
+        // why LogFilePrefix was rejected, and that explanation should not trip the check
+        // that keeps it rejected.
+        Workflow.Should().Contain("trx;LogFileName=",
+            because: "result files must be named, not generated from a clock");
+
+        Workflow.Should().NotContain("trx;LogFilePrefix",
+            because: "a second-resolution timestamp is not a unique name");
+    }
+
+    [Fact]
+    public void TheGuardStillRefusesASuiteThatDidNotRunInFull()
+    {
+        // The counters are the trx schema's, not the console summary's: a skipped test is
+        // notExecuted there and there is no skipped attribute at all, so a guard summing the
+        // wrong name would report a clean suite forever.
+        Workflow.Should().Contain("notExecuted");
+        Workflow.Should().Contain("$failed");
+        Workflow.Should().Contain("MINIMUM_TESTS");
+    }
 }

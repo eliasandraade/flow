@@ -63,37 +63,67 @@ jobs:
       # Testcontainers against the Docker daemon the runner provides. There is deliberately
       # no fallback: a test that cannot reach a database fails rather than passing quietly,
       # so a green run here means the database tests really ran.
-      # LogFilePrefix, not LogFileName: a fixed name makes every test project overwrite the
-      # same file, and the guard below would then read one project's totals as the whole
-      # suite. The prefix form gives each project its own file.
+      #
+      # One project at a time, each writing a file named after itself. Running the solution
+      # in one command takes a single --logger for all of them, and the only way to keep the
+      # files apart there is LogFilePrefix, which appends a timestamp resolved to the second:
+      # two projects finishing inside the same second share a file and the guard below reads
+      # one project's totals as the whole suite. A name chosen per project cannot collide,
+      # whatever the runner's timing happens to be.
+      #
+      # A failing project does not stop the loop. Running the rest costs a few minutes and
+      # gives the whole picture, and it keeps the guard reporting "N failed" rather than
+      # "results missing", which is a different and far more confusing diagnosis.
       - name: Test (Release)
-        run: >-
-          dotnet test Flow.sln -c Release --no-build
-          --logger "trx;LogFilePrefix=flow"
-          --results-directory ./test-results
+        run: |
+          set -uo pipefail
+          status=0
+
+          for project in tests/*/*.csproj; do
+            name=$(basename "$project" .csproj)
+            echo "::group::$name"
+            dotnet test "$project" -c Release --no-build \
+              --logger "trx;LogFileName=$name.trx" \
+              --results-directory ./test-results || status=1
+            echo "::endgroup::"
+          done
+
+          exit $status
 
       # A skipped test is invisible in a summary line, and so is a suite that quietly
       # stopped running one of its projects. This makes both loud.
       - name: Refuse skipped or missing tests
         if: always()
+        env:
+          # The suite only grows. A floor a little under the current count catches a project
+          # that stopped reporting without needing an edit for every test added.
+          MINIMUM_TESTS: '325'
         run: |
           set -euo pipefail
           shopt -s nullglob
+
+          projects=(tests/*/*.csproj)
+          missing=0
+
+          # Each file is named after its project, so a project that did not report can be
+          # named instead of showing up as an arithmetic discrepancy.
+          for project in "${projects[@]}"; do
+            name=$(basename "$project" .csproj)
+            if [ ! -s "./test-results/$name.trx" ]; then
+              echo "::error::$name produced no result file; that project did not report."
+              missing=1
+            fi
+          done
+
+          [ "$missing" -eq 0 ] || exit 1
+
           files=(./test-results/*.trx)
-          expected_projects=$(ls -d tests/*/ | wc -l)
+          echo "Found ${#files[@]} result files for ${#projects[@]} test projects."
 
-          echo "Found ${#files[@]} result files for $expected_projects test projects."
-
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::No test results were produced."
-            exit 1
-          fi
-
-          # The prefix carries a second-resolution timestamp, so two projects finishing
-          # within the same second would share a file and the totals below would undercount.
-          # Failing here is the honest outcome; a silent undercount is not.
-          if [ ${#files[@]} -ne "$expected_projects" ]; then
-            echo "::error::Expected one result file per test project. Some results are missing or collided."
+          # Named files cannot collide, so a file beyond the expected set came from
+          # somewhere else and would be summed into the totals below.
+          if [ ${#files[@]} -ne ${#projects[@]} ]; then
+            echo "::error::Expected exactly one result file per test project."
             exit 1
           fi
 
@@ -121,8 +151,8 @@ jobs:
             exit 1
           fi
 
-          if [ "$total" -lt 300 ]; then
-            echo "::error::Only $total tests ran; the suite is expected to be larger."
+          if [ "$total" -lt "$MINIMUM_TESTS" ]; then
+            echo "::error::Only $total tests ran; at least $MINIMUM_TESTS were expected."
             exit 1
           fi
 
