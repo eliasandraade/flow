@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Flow.Domain.Tests", "tests\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Flow.Integration.Tests", "tests\Flow.Integration.Tests\Flow.Integration.Tests.csproj", "{8171AD9B-E0AA-460C-AFD2-2824B311591F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Flow.Architecture.Tests", "tests\Flow.Architecture.Tests\Flow.Architecture.Tests.csproj", "{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -115,6 +117,18 @@ Global
 		{8171AD9B-E0AA-460C-AFD2-2824B311591F}.Release|x64.Build.0 = Release|Any CPU
 		{8171AD9B-E0AA-460C-AFD2-2824B311591F}.Release|x86.ActiveCfg = Release|Any CPU
 		{8171AD9B-E0AA-460C-AFD2-2824B311591F}.Release|x86.Build.0 = Release|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Debug|x64.Build.0 = Debug|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Debug|x86.Build.0 = Debug|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Release|x64.ActiveCfg = Release|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Release|x64.Build.0 = Release|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Release|x86.ActiveCfg = Release|Any CPU
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -127,5 +141,6 @@ Global
 		{7DA31847-9EBE-4A1C-A766-A81CF681699D} = {65974883-7033-41BA-98E5-548C40541E9D}
 		{8B5ABA3E-F44E-4948-A072-1C209571BF40} = {65974883-7033-41BA-98E5-548C40541E9D}
 		{8171AD9B-E0AA-460C-AFD2-2824B311591F} = {65974883-7033-41BA-98E5-548C40541E9D}
+		{0C82CABD-9EBF-4B93-9F45-97CA8D527CC5} = {65974883-7033-41BA-98E5-548C40541E9D}
 	EndGlobalSection
 EndGlobal
