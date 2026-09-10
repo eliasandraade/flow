@@ -12,6 +12,7 @@ using Flow.Infrastructure.Persistence.Mongo;
 using Flow.Infrastructure.Seeding;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -73,6 +74,20 @@ builder.Services.ConfigureOptions<JwtBearerOptionsSetup>();
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+
+// ---------------------------------------------------------------------------
+// Forwarded headers — behind Traefik the TCP peer is the proxy, not the user.
+// ---------------------------------------------------------------------------
+builder.Services.Configure<ForwardedHeadersSettings>(
+    builder.Configuration.GetSection(ForwardedHeadersSettings.SectionName));
+
+// Bound through options rather than read from builder.Configuration here, and for the same
+// reason the rate limits are: configuration supplied by a host that wraps this one — a test
+// host, for instance — is not visible before Build(). A proxy setting that silently fails
+// to apply is precisely the failure this whole section exists to prevent.
+builder.Services.AddOptions<ForwardedHeadersOptions>()
+    .Configure<IOptions<ForwardedHeadersSettings>>(
+        (options, settings) => ForwardedHeadersSetup.Apply(options, settings.Value));
 
 // ---------------------------------------------------------------------------
 // CORS — explicit origins only. A wildcard would be a silent invitation.
@@ -274,6 +289,17 @@ app.UseSerilogRequestLogging(options =>
         : http.Request.Path.StartsWithSegments("/health") ? Serilog.Events.LogEventLevel.Verbose
         : Serilog.Events.LogEventLevel.Information;
 });
+
+// First in the pipeline, before anything reads the address or the scheme: HTTPS
+// redirection, the rate limiter and the request log all have to see the client rather than
+// the proxy.
+var forwardedSettings = app.Services
+    .GetRequiredService<IOptions<ForwardedHeadersSettings>>().Value;
+
+ForwardedHeadersSetup.Validate(forwardedSettings, app.Environment.IsDevelopment());
+
+if (forwardedSettings.Enabled)
+    app.UseForwardedHeaders();
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 

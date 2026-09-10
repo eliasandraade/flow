@@ -204,6 +204,10 @@ Três nomes são planos nos dois mundos, porque a aplicação os lê planos:
 | `GEMINI_MODEL` | `Gemini__Model` | Não |
 | `ONESIGNAL_APP_ID` | `OneSignal__AppId` | Não |
 | `ONESIGNAL_API_KEY` | `OneSignal__ApiKey` | Não |
+| `FORWARDED_HEADERS_ENABLED` | `ForwardedHeaders__Enabled` | Atrás de proxy |
+| `FORWARDED_TRUSTED_NETWORKS` | `ForwardedHeaders__TrustedNetworks__0` | Atrás de proxy |
+| `FORWARDED_TRUSTED_PROXIES` | `ForwardedHeaders__TrustedProxies__0` | Alternativa à rede |
+| `FORWARDED_LIMIT` | `ForwardedHeaders__ForwardLimit` | Não (1) |
 | `OTLP_ENDPOINT` | `OpenTelemetry__OtlpEndpoint` | Não |
 | `SWAGGER_ENABLED` | `Swagger__Enabled` | Não |
 | `CORS_ALLOWED_ORIGINS` | `CORS_ALLOWED_ORIGINS` | Não |
@@ -216,9 +220,17 @@ Para gerar um segredo JWT:
 openssl rand -base64 48
 ```
 
-> A API **recusa iniciar** fora de Development se o segredo JWT ainda for o placeholder ou
-> tiver menos de 32 bytes. É deliberado: um segredo fraco é a falha mais fácil de cometer e
-> a mais cara de descobrir depois.
+> A API **recusa iniciar** fora de Development em duas situações, pelo mesmo motivo: uma
+> configuração de segurança que falha em silêncio é pior do que uma que falha alto. São
+> elas o segredo JWT ainda no placeholder ou com menos de 32 bytes, e
+> `ForwardedHeaders__Enabled` ligado sem nenhum proxy ou rede confiável declarados — aí os
+> cabeçalhos seriam ignorados e todos os clientes dividiriam um balde de rate limit,
+> parecendo configurado.
+
+**Atrás de proxy reverso** (Traefik no Dokploy), ligue `ForwardedHeaders__Enabled` e declare
+a rede do proxy. Sem isso a API vê o endereço do Traefik para todo mundo e o esquema como
+`http`. Detalhes e o porquê de ser uma permissão explícita em
+[`deployment.md`](docs/sprint-2/deployment.md#45-forwarded-headers--obrigatório-atrás-do-proxy).
 
 **Chaves opcionais são opcionais de verdade.** Sem `Gemini__ApiKey` os endpoints
 inteligentes respondem `503` e o resto do produto funciona igual. Sem credencial OneSignal

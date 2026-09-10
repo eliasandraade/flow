@@ -72,6 +72,13 @@ services:
       OneSignal__AppId: ${ONESIGNAL_APP_ID:-}
       OneSignal__ApiKey: ${ONESIGNAL_API_KEY:-}
 
+      # Lists reach .NET configuration as indexed keys, which is why these are not a
+      # single comma-separated variable.
+      ForwardedHeaders__Enabled: ${FORWARDED_HEADERS_ENABLED:-false}
+      ForwardedHeaders__TrustedNetworks__0: ${FORWARDED_TRUSTED_NETWORKS:-}
+      ForwardedHeaders__TrustedProxies__0: ${FORWARDED_TRUSTED_PROXIES:-}
+      ForwardedHeaders__ForwardLimit: ${FORWARDED_LIMIT:-1}
+
       OpenTelemetry__OtlpEndpoint: ${OTLP_ENDPOINT:-}
       Swagger__Enabled: ${SWAGGER_ENABLED:-true}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}

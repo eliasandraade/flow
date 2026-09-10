@@ -138,8 +138,7 @@ SEED_DEMO_DATA=false
 
 ### 4.4 HTTPS com Traefik
 
-O Dokploy já roda Traefik. Basta associar o domínio e habilitar o certificado; o
-`UseHttpsRedirection` da API cuida do restante.
+O Dokploy já roda Traefik. Basta associar o domínio e habilitar o certificado.
 
 ```yaml
 # labels equivalentes, caso configure na mão
@@ -150,10 +149,63 @@ traefik.http.routers.flow.tls.certresolver: "letsencrypt"
 traefik.http.services.flow.loadbalancer.server.port: "8080"
 ```
 
-Como o TLS termina no Traefik, a aplicação recebe HTTP interno. Se algum dia a URL absoluta
-gerada estiver errada, o ajuste é `ForwardedHeaders`, não desligar o redirecionamento.
+### 4.5 Forwarded headers — obrigatório atrás do proxy
 
-### 4.5 Depois do deploy
+O TLS termina no Traefik, então a aplicação recebe HTTP interno e o peer TCP é o **proxy**,
+não o usuário. Sem processar os cabeçalhos encaminhados:
+
+- `RemoteIpAddress` é o endereço do Traefik para **todo mundo**. O rate limit de `/auth/*`
+  particiona por endereço, então **todos os clientes caem no mesmo balde** — o primeiro a
+  errar a senha algumas vezes tranca os demais;
+- `Request.Scheme` é `http` mesmo com o cliente em HTTPS, o que faz `UseHttpsRedirection`
+  e qualquer URL absoluta olharem para o lado errado;
+- um `RemoteIp` gravado em log ou auditoria apontaria para o proxy.
+
+```bash
+FORWARDED_HEADERS_ENABLED=true
+FORWARDED_TRUSTED_NETWORKS=172.16.0.0/12   # rede do Docker onde o Traefik roda
+FORWARDED_LIMIT=1                          # um proxy, um salto
+```
+
+Fora do Compose, os nomes são hierárquicos:
+
+```bash
+ForwardedHeaders__Enabled=true
+ForwardedHeaders__TrustedNetworks__0=172.16.0.0/12
+ForwardedHeaders__ForwardLimit=1
+```
+
+#### Por que é uma lista e não um interruptor
+
+Um cabeçalho encaminhado é só um cabeçalho: qualquer cliente pode enviar um. Ele só vale
+como prova quando a requisição **chegou de um proxy que nós operamos**, e é isso que
+`TrustedProxies` e `TrustedNetworks` declaram.
+
+O padrão do ASP.NET Core confia apenas em loopback, o que é correto para um proxy na mesma
+máquina e inútil em container, onde o Traefik chega pela rede bridge. A saída fácil e
+errada é limpar `KnownProxies` e `KnownNetworks` para "funcionar": isso transforma um
+cabeçalho controlado pelo cliente na identidade do cliente, e qualquer um passa a escolher
+o próprio endereço — inclusive para escapar do rate limit. **Não fazemos isso.** A lista
+substitui o padrão de loopback por uma permissão explícita.
+
+`ForwardLimit` fica em 1 pelo mesmo motivo: os cabeçalhos são lidos da direita para a
+esquerda, e um salto significa ler apenas o valor que o nosso proxy anexou. Um cliente que
+mande `X-Forwarded-For: 10.9.9.9, 203.0.113.10` não consegue fazer o `10.9.9.9` ser lido.
+
+#### Falha explícita em vez de silenciosa
+
+Se `FORWARDED_HEADERS_ENABLED=true` e nenhuma rede ou proxy for declarado, **a API recusa
+iniciar** fora de Development. É deliberado: nessa combinação só o loopback seria confiado,
+os cabeçalhos seriam ignorados, e tudo pareceria configurado enquanto todos os clientes
+dividiam um balde de rate limit. É o mesmo critério aplicado ao segredo JWT.
+
+Em Development a validação não roda, porque ali normalmente não há proxy nenhum.
+
+O comportamento é coberto por `ForwardedHeadersTests`, inclusive o caso que mais importa:
+um cliente que **não** veio pelo proxy não consegue forjar o próprio endereço nem o
+esquema.
+
+### 4.6 Depois do deploy
 
 ```bash
 curl -fsS https://flow-api.example.com/health/live
@@ -218,6 +270,7 @@ A URL da API vem do perfil, por `EXPO_PUBLIC_API_URL`. Ajuste antes de gerar o b
 | **Build da imagem Docker** | ⏳ **não executado** |
 | **`docker compose up`** | ⏳ **não executado** |
 | **Deploy no Dokploy com HTTPS** | ⏳ **não executado** |
+| Forwarded headers com proxy confiável | ✅ verificado por teste |
 | **APK via EAS** | ⏳ **não executado** |
 
 ### Por que os quatro últimos estão pendentes
