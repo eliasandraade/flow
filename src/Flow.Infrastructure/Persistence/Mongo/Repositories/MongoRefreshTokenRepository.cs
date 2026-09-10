@@ -50,18 +50,19 @@ public sealed class MongoRefreshTokenRepository
             .Set(x => x.RevokedAt, (DateTimeOffset?)consumedAt)
             .Set(x => x.ReplacedByTokenHash, replacementTokenHash);
 
-        try
-        {
-            var result = await UpdateAsync(stillUnconsumed, consume, cancellationToken);
-            return result.ModifiedCount == 1;
-        }
-        catch (MongoException ex) when (ex.HasErrorLabel("TransientTransactionError"))
-        {
-            // Both requests reached the same document inside overlapping transactions and
-            // the server aborted this one. That is losing the race, not a server fault, so
-            // it answers like every other loser instead of surfacing as a 500.
-            return false;
-        }
+        var result = await UpdateAsync(stillUnconsumed, consume, cancellationToken);
+
+        // false means one thing only: no document matched, so this caller did not consume
+        // the token. Database failures are deliberately not caught here.
+        //
+        // An earlier version swallowed TransientTransactionError and returned false, which
+        // conflated two situations that could not be more different. A lost race is a
+        // security signal — the token was already consumed, and the policy revokes the
+        // family. A step-down, an election or a write conflict is a cluster event that says
+        // nothing about the token. Reporting the second as the first would log a user out
+        // of every session because a replica was elected, and would also rob the driver of
+        // the retry it was about to perform.
+        return result.ModifiedCount == 1;
     }
 
     public async Task<bool> TryRevokeAsync(

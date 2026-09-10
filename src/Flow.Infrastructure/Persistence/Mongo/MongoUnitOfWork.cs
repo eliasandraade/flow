@@ -10,9 +10,33 @@ namespace Flow.Infrastructure.Persistence.Mongo;
 /// Under EF Core the atomicity of "aggregate + audit log + snapshot" came free from a
 /// single SaveChanges. With explicit document writes that guarantee has to be created
 /// deliberately, and this is where it is created. Requires a replica set.
+///
+/// Execution goes through the driver's <c>WithTransactionAsync</c> rather than a hand-rolled
+/// StartTransaction/Commit pair, because a correct transaction is not just "start, write,
+/// commit". Two distinct retry rules have to hold, and getting either wrong is invisible
+/// until a cluster event happens in production:
+///
+/// - <c>TransientTransactionError</c> — the transaction as a whole may be retried. A primary
+///   step-down, an election or a write conflict lands here.
+/// - <c>UnknownTransactionCommitResult</c> — the commit alone may be retried, without
+///   re-running the work, because the commit may already have succeeded.
+///
+/// The driver implements both. Reimplementing them here would be duplicating subtle logic
+/// that the vendor already maintains, so the callback is handed to the official API instead.
 /// </summary>
 public sealed class MongoUnitOfWork : IUnitOfWork
 {
+    /// <summary>
+    /// Majority on both ends, stated rather than inherited.
+    ///
+    /// The audit trail is the product's evidence of what happened; a commit acknowledged by
+    /// a minority that a later election discards would take that evidence with it. Majority
+    /// write concern is also what makes the commit-retry rule meaningful in the first place.
+    /// </summary>
+    private static readonly TransactionOptions Options = new(
+        readConcern: ReadConcern.Majority,
+        writeConcern: WriteConcern.WMajority);
+
     private readonly FlowMongoContext _context;
     private readonly MongoSessionAccessor _sessionAccessor;
     private readonly ILogger<MongoUnitOfWork> _logger;
@@ -49,28 +73,23 @@ public sealed class MongoUnitOfWork : IUnitOfWork
 
         using var scope = _sessionAccessor.Use(session);
 
-        session.StartTransaction();
-
         try
         {
-            var result = await operation(cancellationToken);
-            await session.CommitTransactionAsync(cancellationToken);
-            return result;
+            // The callback can run more than once: that is the point of the transient
+            // rule, and it is safe here because everything inside writes through this
+            // session, so a discarded attempt leaves nothing behind. Anything that must
+            // happen exactly once — emitting metrics, for instance — belongs after this
+            // call returns, not inside it.
+            return await session.WithTransactionAsync(
+                async (_, ct) => await operation(ct),
+                Options,
+                cancellationToken);
         }
         catch (Exception ex)
         {
-            // If any part of the unit fails — including the audit write — nothing is
-            // persisted. A state transition without its audit entry is worse than a
-            // failed request.
-            try
-            {
-                await session.AbortTransactionAsync(CancellationToken.None);
-            }
-            catch (Exception abortEx)
-            {
-                _logger.LogError(abortEx, "Failed to abort a MongoDB transaction after an error.");
-            }
-
+            // Reached only once the driver has stopped retrying: either the failure was
+            // never transient, or the retry budget ran out. Nothing was persisted — a state
+            // transition without its audit entry is worse than a failed request.
             _logger.LogWarning(ex, "Transaction rolled back: {Message}", ex.Message);
             throw;
         }
