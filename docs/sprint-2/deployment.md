@@ -267,11 +267,11 @@ A URL da API vem do perfil, por `EXPO_PUBLIC_API_URL`. Ajuste antes de gerar o b
 | Export de `openapi.json` a partir da aplicação | ✅ verificado, 54 endpoints |
 | Bundle Android do mobile | ✅ verificado, 5,59 MB Hermes |
 | `expo-doctor` | ✅ 18/18 |
-| **Build da imagem Docker** | ⏳ **não executado** |
-| **`docker compose up`** | ⏳ **não executado** |
-| **Deploy no Dokploy com HTTPS** | ⏳ **não executado** |
+| Build da imagem Docker | ✅ verificado **na CI**, não nesta máquina |
+| `docker compose up` com replica set | ✅ verificado **na CI**, com `/health/ready` verde |
 | Forwarded headers com proxy confiável | ✅ verificado por teste |
-| **APK via EAS** | ⏳ **não executado** |
+| **Deploy no Dokploy com HTTPS** | ⏳ **não executado** — falta credencial |
+| **APK via EAS** | ⏳ **não executado** — falta credencial |
 
 ### Onde isso é verificado agora
 
@@ -288,15 +288,17 @@ O que a máquina de desenvolvimento não consegue rodar, a CI roda. O workflow
 Sem segredo nenhum: o `.env` do job de Docker é gerado na hora, com um valor descartável, e
 `.env` não está no repositório. As permissões do workflow são `contents: read`.
 
-### Por que os itens de credencial continuam pendentes
+### Docker: construído, só que não aqui
 
-**Docker.** O Docker Desktop desta máquina não sobe: os processos iniciam, mas a distro
-WSL `docker-desktop` permanece em `Stopped` e `docker desktop status` trava. Foram
-tentadas a inicialização direta, `docker desktop start` e um restart completo com
-`wsl --shutdown`. O `Dockerfile` e o `docker-compose.yml` estão escritos e revisados, mas
-**não foram construídos nem executados aqui**, e não vou afirmar o contrário.
+O Docker Desktop desta máquina não sobe — os processos iniciam, a distro WSL
+`docker-desktop` fica em `Stopped` e `docker desktop status` trava. Isso não mudou.
 
-Para validar em uma máquina com Docker funcionando:
+O que mudou é que deixou de importar: o job de Docker da CI constrói a imagem e sobe o
+compose inteiro a cada push, em runner limpo. A imagem passou a ser validada de verdade, e
+por alguém que não sou eu com o ambiente já aquecido — o que é uma evidência melhor do que
+a que eu teria produzido localmente.
+
+Para reproduzir em uma máquina com Docker funcionando:
 
 ```bash
 docker compose build
@@ -304,8 +306,11 @@ docker compose up -d
 curl -fsS localhost:5153/health/ready
 ```
 
+### O que continua pendente, e por quê
+
 **Dokploy e EAS.** Dependem de credenciais que não existem neste ambiente: acesso ao
-servidor Dokploy e conta EAS com credencial de assinatura Android.
+servidor Dokploy e conta EAS com credencial de assinatura Android. Nenhum dos dois pode ser
+resolvido por engenharia — só por acesso.
 
 O que **foi** verificado é o que sustenta os dois: a aplicação publica em Release, sobe
 contra um MongoDB real, responde nos health checks, e o projeto mobile empacota para

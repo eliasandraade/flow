@@ -17,7 +17,7 @@ auditoria inicial do código até a evidência final de verificação.
 - **Mobile:** 23 telas, `tsc --noEmit` limpo, `expo-doctor` 18/18, bundle Android gerado
 - **Compliance:** **110 de 113** requisitos `VERIFIED` — ver [seção 10](#10-estado-final-por-área)
 - **Pendências:** 2, ambas por credencial externa — ver [seção 11](#11-pendências-reais)
-- **CI:** `.github/workflows/ci.yml`, quatro jobs — ver [seção 14.5](#145-ci)
+- **CI:** `.github/workflows/ci.yml`, quatro jobs, **verde** — ver [seção 14.5](#145-ci)
 
 > As seções 1 a 5 registram a auditoria e o plano do início da Sprint, e são mantidas como
 > estavam: elas são o ponto de partida contra o qual o resultado é comparado. O estado

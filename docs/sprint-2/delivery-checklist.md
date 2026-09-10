@@ -197,26 +197,29 @@ Total                      313   0 falhas
 
 ## 11. Pendências reais
 
-Quatro itens, **todos** dependendo de credencial ou de ambiente externo. Nenhum depende de
-código que falte escrever.
+Três itens, **todos** dependendo de credencial externa. Nenhum depende de código que falte
+escrever, e nenhum pode ser resolvido por engenharia — só por acesso.
 
 | # | Pendência | Bloqueio | O que falta |
 |---|---|---|---|
-| 1 | Chamada real ao Gemini | Sem `GEMINI_API_KEY` | Definir a variável e chamar `POST /dashboard/insights` |
+| 1 | Chamada real ao Gemini | Sem `Gemini__ApiKey` | Definir a variável e chamar `POST /dashboard/insights` |
 | 2 | Push real via OneSignal | Sem credencial OneSignal/FCM | Definir App ID e REST API key |
-| 3 | Build da imagem e compose | Docker Desktop não inicia aqui | `docker compose build && docker compose up -d` em máquina com Docker |
-| 4 | APK e deploy HTTPS | Sem credencial EAS e Dokploy | `eas build -p android --profile preview`; publicar no Dokploy |
+| 3 | APK assinado e deploy HTTPS | Sem credencial EAS e Dokploy | `eas build -p android --profile preview`; publicar no Dokploy |
+
+O build da imagem e o `docker compose up` **deixaram de ser pendência**: o job de Docker da
+CI faz os dois a cada push, em runner limpo.
 
 ### Sobre o Docker nesta máquina
 
 O Docker Desktop está instalado, os processos iniciam, mas a distro WSL `docker-desktop`
 fica em `Stopped` e `docker desktop status` trava. Foram tentadas inicialização direta,
-`docker desktop start` e restart completo com `wsl --shutdown`.
+`docker desktop start` e restart completo com `wsl --shutdown`. Isso continua assim.
 
-Isso não bloqueou o trabalho: em vez de esperar, subi um **MongoDB 8.0.30 real em replica
-set de nó único**, e é contra ele que os 170 testes de integração rodam — com transações
-reais, commit e abort verificados. O fixture aceita `FLOW_TEST_MONGO_URI` justamente para
-isso, e cai em Testcontainers onde houver um daemon.
+Não bloqueou o trabalho em nenhum momento. Localmente, os 170 testes de integração rodam
+contra um **MongoDB 8.0.30 real em replica set de nó único** — com transações reais, commit
+e abort verificados — e o fixture aceita `FLOW_TEST_MONGO_URI` exatamente para isso, caindo
+em Testcontainers onde houver daemon. Na CI, onde há daemon, é Testcontainers que sobe o
+banco, e a imagem Docker é construída e executada de verdade.
 
 ---
 
