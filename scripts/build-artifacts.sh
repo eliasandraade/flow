@@ -111,8 +111,14 @@ if [ -s "$DIST/presentation-assets/openapi.json" ]; then
   ' "$DIST/presentation-assets/openapi.json" > "$DIST/presentation-assets/endpoints.txt"
 fi
 
+# FLOW_SKIP_TESTS exists for one situation: a pipeline where the suite already ran in an
+# earlier job and the container image for MongoDB would have to be pulled a second time.
+# It is opt-in, so running the script by hand always tests.
 echo "==> Running the test suite"
-if dotnet test Flow.sln --nologo -v quiet > "$STAGE/test-output.txt" 2>&1; then
+if [ "${FLOW_SKIP_TESTS:-0}" = "1" ]; then
+  echo "    skipped by FLOW_SKIP_TESTS; results recorded from the caller"
+  echo "Test suite skipped in this run (FLOW_SKIP_TESTS=1)." > "$STAGE/test-output.txt"
+elif dotnet test Flow.sln --nologo -v quiet > "$STAGE/test-output.txt" 2>&1; then
   echo "    tests passed"
 else
   echo "    WARNING: some tests failed; see the recorded output" >&2

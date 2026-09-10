@@ -1,0 +1,276 @@
+name: CI
+
+# Push covers the branches we work on; pull_request covers contributions from forks. A pull
+# request opened from a branch of this repository would otherwise be validated twice for the
+# same commit, so those runs are skipped per job — the push run already checked them.
+on:
+  push:
+    branches: [master, sprint-2]
+  pull_request:
+    branches: [master, sprint-2]
+
+# A new commit makes the previous run obsolete. Cancelling it frees the runner instead of
+# spending minutes proving something about code nobody will merge.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only. Nothing here publishes, comments or tags, so nothing here needs to be able to.
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '20.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  backend:
+    name: Backend — build and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # See the comment on the triggers.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Keyed on the project files, which is what actually determines the package graph.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Flow.sln
+
+      - name: Build (Release)
+        run: dotnet build Flow.sln -c Release --no-restore
+
+      # The integration suite talks to a real MongoDB replica set, brought up by
+      # Testcontainers against the Docker daemon the runner provides. There is deliberately
+      # no fallback: a test that cannot reach a database fails rather than passing quietly,
+      # so a green run here means the database tests really ran.
+      - name: Test (Release)
+        run: >-
+          dotnet test Flow.sln -c Release --no-build
+          --logger "trx;LogFileName=results.trx"
+          --results-directory ./test-results
+
+      # A skipped test is invisible in a summary line. This makes it loud.
+      - name: Refuse skipped tests
+        if: always()
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(./test-results/*.trx)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No test results were produced."
+            exit 1
+          fi
+          skipped=$(grep -ho 'skipped="[0-9]*"' "${files[@]}" \
+            | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          total=$(grep -ho 'total="[0-9]*"' "${files[@]}" \
+            | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          echo "Executed $total tests, $skipped skipped."
+          if [ "$skipped" != "0" ]; then
+            echo "::error::$skipped test(s) were skipped. The suite must run in full."
+            exit 1
+          fi
+          if [ "$total" -lt 300 ]; then
+            echo "::error::Only $total tests ran; the suite is expected to be larger."
+            exit 1
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ./test-results
+          retention-days: 7
+
+  mobile:
+    name: Mobile — typecheck and doctor
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install (from the lockfile)
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # Checks the dependency graph against what the Expo SDK actually pins. This is the
+      # gate that caught the charting library conflict during the sprint.
+      - name: Expo doctor
+        run: npx expo-doctor
+
+      # Bundles the app for Android. No credentials involved: it proves the project packages,
+      # which is a different thing from the signed APK that still needs an EAS account.
+      - name: Bundle for Android
+        run: npx expo export --platform android
+
+  docker:
+    name: Docker image and compose stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ephemeral and never committed — .env is gitignored. The value is a throwaway that
+      # only has to satisfy the length check the API enforces at startup.
+      - name: Write a throwaway environment
+        run: |
+          set -euo pipefail
+          {
+            echo "ASPNETCORE_ENVIRONMENT=Development"
+            echo "JWT_SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n')"
+            echo "SEED_DEMO_DATA=false"
+          } > .env
+
+      # The Dockerfile and the compose file were written and reviewed but never built: the
+      # development machine has a Docker Desktop that does not start. This job is where they
+      # are actually exercised for the first time.
+      - name: Build the image
+        run: docker compose build
+
+      # Brings up MongoDB as a single-node replica set and the API on top of it. The
+      # compose healthcheck initiates the set and only reports healthy once the node is a
+      # writable primary, which is what the API waits on.
+      - name: Start the stack
+        run: docker compose up -d
+
+      # Liveness says the process is up; readiness says it can actually serve, which here
+      # means MongoDB answered and the indexes exist. Waiting on readiness is what proves
+      # the replica set and the application came up together.
+      - name: Wait for readiness
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:5153/health/ready > /dev/null 2>&1; then
+              echo "The stack is ready."
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "::error::The stack never reported ready."
+          exit 1
+
+      - name: Check both probes
+        run: |
+          set -euo pipefail
+          echo "live:"
+          curl -fsS http://localhost:5153/health/live
+          echo
+          echo "ready:"
+          curl -fsS http://localhost:5153/health/ready
+          echo
+
+      # Proves the container serves the product and not just a health endpoint, and that
+      # its own configuration validation let it start.
+      - name: Check the API answers
+        run: |
+          set -euo pipefail
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5153/api/v1/projects)
+          echo "GET /api/v1/projects -> $status"
+          test "$status" = "401" || { echo "::error::Expected 401 from an anonymous call, got $status."; exit 1; }
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color --tail 200 || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true
+
+  artifacts:
+    name: Delivery artefacts and OpenAPI
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # The suite already ran in the backend job; repeating it here would pull the MongoDB
+      # image a second time to prove the same thing.
+      - name: Build the delivery artefacts
+        env:
+          FLOW_SKIP_TESTS: '1'
+        run: ./scripts/build-artifacts.sh
+
+      # The specification is exported from the running application rather than from a copy
+      # kept by hand, so an endpoint that stops being reachable shows up here.
+      - name: Check the exported specification
+        run: |
+          set -euo pipefail
+          spec=dist/presentation-assets/openapi.json
+          test -s "$spec" || { echo "::error::openapi.json was not produced."; exit 1; }
+          endpoints=$(node -e "const s=require('./$spec');console.log(Object.values(s.paths??{}).reduce((n,m)=>n+Object.keys(m).length,0))")
+          echo "The specification describes $endpoints endpoints."
+          test "$endpoints" -ge 50 || { echo "::error::Only $endpoints endpoints; expected the full surface."; exit 1; }
+
+      # Source and documentation only. Nothing here carries a credential: .env is not in the
+      # repository, and .env.example holds empty placeholders.
+      - name: Upload the artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-artifacts
+          path: |
+            dist/presentation-assets/openapi.json
+            dist/presentation-assets/endpoints.txt
+          retention-days: 14

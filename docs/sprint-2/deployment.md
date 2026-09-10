@@ -273,7 +273,22 @@ A URL da API vem do perfil, por `EXPO_PUBLIC_API_URL`. Ajuste antes de gerar o b
 | Forwarded headers com proxy confiável | ✅ verificado por teste |
 | **APK via EAS** | ⏳ **não executado** |
 
-### Por que os quatro últimos estão pendentes
+### Onde isso é verificado agora
+
+O que a máquina de desenvolvimento não consegue rodar, a CI roda. O workflow
+[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) tem quatro jobs:
+
+| Job | O que prova |
+|---|---|
+| **Backend** | `restore`, `build -c Release`, suíte completa contra MongoDB real via Testcontainers, e um passo que **falha se algum teste for pulado** |
+| **Mobile** | `npm ci`, `tsc --noEmit`, `expo-doctor`, `expo export --platform android` |
+| **Docker** | `docker compose build` e `docker compose up`, esperando o `/health/ready` — é aqui que o Dockerfile e o compose são construídos pela primeira vez |
+| **Artefatos** | `build-artifacts.sh` e conferência do `openapi.json` exportado da aplicação |
+
+Sem segredo nenhum: o `.env` do job de Docker é gerado na hora, com um valor descartável, e
+`.env` não está no repositório. As permissões do workflow são `contents: read`.
+
+### Por que os itens de credencial continuam pendentes
 
 **Docker.** O Docker Desktop desta máquina não sobe: os processos iniciam, mas a distro
 WSL `docker-desktop` permanece em `Stopped` e `docker desktop status` trava. Foram
