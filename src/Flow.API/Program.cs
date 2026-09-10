@@ -133,13 +133,20 @@ builder.Services.AddRateLimiter(options =>
 
     // Partitioned by user rather than by address: these calls cost real money, and one
     // user behind a shared NAT should not consume everyone else's budget.
+    //
+    // Two things have to be right for that to work, and both were wrong. The limiter has
+    // to run after authentication, or http.User is still anonymous when the key is
+    // computed; and the id has to be read the way the token actually arrives, because the
+    // bearer handler maps "sub" onto NameIdentifier and a lookup for "sub" alone comes
+    // back empty even on an authenticated request. Either mistake silently collapses every
+    // user behind one address into a single bucket.
     options.AddPolicy(RateLimitPolicies.Ai, http =>
         !LimitsFor(http).Enabled
             ? RateLimitPartition.GetNoLimiter<string>("disabled")
             : RateLimitPartition.GetFixedWindowLimiter(
-                http.User.FindFirst("sub")?.Value
-                    ?? http.Connection.RemoteIpAddress?.ToString()
-                    ?? "unknown",
+                UserIdentity.IdOf(http.User) is { } userId
+                    ? $"user:{userId}"
+                    : $"ip:{http.Connection.RemoteIpAddress?.ToString() ?? "unknown"}",
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = LimitsFor(http).AiPermitPerFiveMinutes,
@@ -279,9 +286,21 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger
 if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 
+// Order matters here, and not only for style.
+//
+// UseCors, UseAuthentication and UseAuthorization must appear in that order — that is a
+// framework requirement. UseRateLimiter has to come after UseRouting because the policies
+// are selected by endpoint attributes, and it is placed after UseAuthentication so the AI
+// policy can see who is calling: before it, http.User is anonymous and every user behind
+// one address shares a bucket.
+//
+// It sits before UseAuthorization on purpose: a caller hammering an endpoint they are not
+// allowed to use should still meet the limiter, rather than being waved through to a 403
+// on every attempt.
+app.UseRouting();
 app.UseCors(CorsPolicy);
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
 

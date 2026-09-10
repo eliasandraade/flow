@@ -16,16 +16,7 @@ public class CurrentUserService : ICurrentUserService
 
     private ClaimsPrincipal? Principal => _httpContextAccessor.HttpContext?.User;
 
-    public Guid? UserId
-    {
-        get
-        {
-            var claim = Principal?.FindFirst(JwtRegisteredClaimNames.Sub)
-                ?? Principal?.FindFirst(ClaimTypes.NameIdentifier);
-
-            return Guid.TryParse(claim?.Value, out var id) ? id : null;
-        }
-    }
+    public Guid? UserId => UserIdentity.GuidOf(Principal);
 
     public string? UserName =>
         Principal?.FindFirst(JwtRegisteredClaimNames.Name)?.Value

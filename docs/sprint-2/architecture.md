@@ -271,7 +271,7 @@ Detalhes em [`observability.md`](observability.md).
 | Validação | `ValidationBehavior` + invariantes de domínio |
 | Autorização | Por papel no endpoint e por recurso no handler |
 | CORS | Origens explícitas por configuração |
-| Rate limiting | Rate limiter nativo do .NET 8 em auth e nos endpoints de IA |
+| Rate limiting | Rate limiter nativo do .NET 8: `/auth/*` por endereço, IA por usuário autenticado |
 | Segredos | Somente variáveis de ambiente; nada de segredo real no repositório |
 | JWT | Segredo validado em tamanho e em valor placeholder |
 | Refresh token | Hash no banco, rotação a cada uso, revogação em cascata na reutilização |

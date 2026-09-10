@@ -346,6 +346,34 @@ Todo ponto concedido gera uma entrada no ledger apontando para o que o originou.
 | POST | `/assistant/ideas/{ideaId}/project-draft` | Manager, Leadership | 20 / 5 min por usuário |
 | POST | `/dashboard/insights` | Leadership | 20 / 5 min por usuário |
 
+**Por usuário é literal.** A cota pertence à identidade autenticada, não ao endereço, e
+duas coisas precisam estar certas para isso funcionar — as duas invisíveis quando estão
+erradas:
+
+1. o rate limiter roda **depois** de `UseAuthentication`. Antes dela `http.User` ainda é
+   anônimo, e a chave de partição cai no endereço;
+2. o id é lido como o token realmente chega. O handler de bearer mapeia `sub` para
+   `ClaimTypes.NameIdentifier` por padrão, então procurar só por `sub` devolve vazio
+   **mesmo em requisição autenticada**.
+
+Qualquer um dos dois faz todos os usuários atrás do mesmo NAT dividirem um balde só.
+`RateLimitPartitioningTests` prova o comportamento em vez de conferir a ordem no
+`Program.cs`.
+
+A ordem do pipeline ficou assim, e cada passo tem motivo:
+
+```text
+UseRouting          → o limiter escolhe a política pelo atributo do endpoint
+UseCors             → exigência do framework: CORS, autenticação e autorização nessa ordem
+UseAuthentication   → a partir daqui http.User existe
+UseRateLimiter      → antes da autorização: quem martela endpoint proibido também é contido
+UseAuthorization
+MapControllers
+```
+
+A política de `/auth/*` continua **por endereço**, de propósito: credential stuffing não
+reusa uma conta, percorre uma lista — particionar por usuário ali não protegeria nada.
+
 **Nenhum destes endpoints altera estado de domínio.** O rascunho de projeto volta como
 preview editável; o projeto só existe quando o gestor executa
 `POST /ideas/{ideaId}/convert`, passando o `assistantRunId` para fechar o ciclo de
