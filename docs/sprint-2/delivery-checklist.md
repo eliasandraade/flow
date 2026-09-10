@@ -45,7 +45,7 @@ Legenda: ✅ verificado em execução · ⏳ pendente de credencial ou ambiente
 | EF Core e SQL Server removidos de `src/` | ✅ |
 | `MongoDB.Driver` 3.11.1, sem provider EF | ✅ |
 | Modelo documental derivado dos access patterns | ✅ [`data-model.md`](data-model.md) |
-| 40 índices criados de forma idempotente | ✅ |
+| 41 índices criados de forma idempotente | ✅ |
 | Replica set com transações reais | ✅ verificado com commit e abort |
 | `IUnitOfWork` sem vazar `IClientSessionHandle` | ✅ |
 | Auditoria e snapshot append-only por construção | ✅ |

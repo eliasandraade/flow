@@ -536,7 +536,7 @@ contra um MongoDB real e descartável, com transações reais.
 | DB-01 | Nenhuma referência a EF Core em `src/`. `ApplicationDbContext`, configurations e migrations removidos. |
 | DB-02 | `MongoDB.Driver` 3.11.1, `MongoClient` singleton em `Flow.Infrastructure/DependencyInjection.cs`. |
 | DB-03 | `docs/sprint-2/data-model.md` escrito antes do código, a partir dos access patterns. |
-| DB-04 | `MongoIndexInitializer` cria 40 índices de forma idempotente no startup. |
+| DB-04 | `MongoIndexInitializer` cria 41 índices de forma idempotente no startup. |
 | DB-05 | `TransactionalIntegrityTests` exercita transação multi-documento real. |
 | DB-06 | `IUnitOfWork.ExecuteAsync` na Application; `IClientSessionHandle` não aparece em nenhuma assinatura da camada. |
 | DB-07 | `IAuditLogRepository` e `IProjectSnapshotRepository` só expõem append e leitura. |

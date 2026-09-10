@@ -20,7 +20,11 @@ public abstract class MongoRepositoryBase<TDocument>
     protected IMongoCollection<TDocument> Collection { get; }
     protected MongoSessionAccessor Sessions { get; }
 
-    private IClientSessionHandle? ActiveSession => Sessions.InTransaction ? Sessions.Session : null;
+    /// <summary>
+    /// The transaction session when one is open. Protected so a repository can reach for a
+    /// driver operation the base class does not wrap, such as FindOneAndUpdate.
+    /// </summary>
+    protected IClientSessionHandle? ActiveSession => Sessions.InTransaction ? Sessions.Session : null;
 
     protected Task InsertAsync(TDocument document, CancellationToken cancellationToken)
     {

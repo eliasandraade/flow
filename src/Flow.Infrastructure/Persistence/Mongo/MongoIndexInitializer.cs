@@ -217,6 +217,11 @@ public sealed class MongoIndexInitializer
             new CreateIndexModel<OutboxMessage>(
                 Builders<OutboxMessage>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.NextAttemptAt),
                 new CreateIndexOptions { Name = "ix_outbox_dispatch" }),
+            // Serves the second half of the claim filter: messages abandoned by a worker
+            // that never released its lease.
+            new CreateIndexModel<OutboxMessage>(
+                Builders<OutboxMessage>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.LeaseExpiresAt),
+                new CreateIndexOptions { Name = "ix_outbox_lease" }),
             // This unique index is the idempotency guarantee for push delivery.
             new CreateIndexModel<OutboxMessage>(
                 Builders<OutboxMessage>.IndexKeys.Ascending(x => x.DedupeKey),

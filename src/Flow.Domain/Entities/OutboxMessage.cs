@@ -32,6 +32,21 @@ public class OutboxMessage
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DispatchedAt { get; private set; }
 
+    /// <summary>Which worker holds the claim. Diagnostic; the lease is what enforces it.</summary>
+    public string? LeaseOwner { get; private set; }
+
+    /// <summary>
+    /// When the claim stops being respected. A worker that crashes after claiming does not
+    /// take the message with it: once this passes, another worker may claim it again.
+    /// </summary>
+    public DateTimeOffset? LeaseExpiresAt { get; private set; }
+
+    public DateTimeOffset? ClaimedAt { get; private set; }
+
+    /// <summary>True when a claimed message may be taken over by another worker.</summary>
+    public bool IsLeaseExpiredAt(DateTimeOffset now) =>
+        Status == OutboxStatus.Processing && LeaseExpiresAt <= now;
+
     private OutboxMessage() { }
 
     public static OutboxMessage For(Notification notification, string dedupeKey)
@@ -57,21 +72,23 @@ public class OutboxMessage
         };
     }
 
-    public void MarkDispatched()
+    public void MarkDispatched(DateTimeOffset? now = null)
     {
         Status = OutboxStatus.Dispatched;
-        DispatchedAt = DateTimeOffset.UtcNow;
+        DispatchedAt = now ?? DateTimeOffset.UtcNow;
         LastError = null;
+        ReleaseLease();
     }
 
     /// <summary>
     /// Records a failed attempt and schedules the next one with exponential backoff plus
     /// jitter, so a provider outage does not produce a synchronised retry storm.
     /// </summary>
-    public void MarkFailed(string error, int maxAttempts = DefaultMaxAttempts)
+    public void MarkFailed(string error, int maxAttempts = DefaultMaxAttempts, DateTimeOffset? now = null)
     {
         AttemptCount++;
         LastError = Truncate(error, 1000);
+        ReleaseLease();
 
         if (AttemptCount >= maxAttempts)
         {
@@ -80,7 +97,31 @@ public class OutboxMessage
         }
 
         Status = OutboxStatus.Failed;
-        NextAttemptAt = DateTimeOffset.UtcNow.Add(BackoffFor(AttemptCount));
+        NextAttemptAt = (now ?? DateTimeOffset.UtcNow).Add(BackoffFor(AttemptCount));
+    }
+
+    /// <summary>
+    /// Hands a claim back without counting an attempt, returning the message to the queue
+    /// as if it had never been picked up. Used when the worker discovers it cannot even try
+    /// — no push credentials, for instance — so nothing is charged against the message.
+    /// </summary>
+    public void ReleaseClaim()
+    {
+        if (Status != OutboxStatus.Processing) return;
+
+        Status = AttemptCount == 0 ? OutboxStatus.Pending : OutboxStatus.Failed;
+        ReleaseLease();
+    }
+
+    /// <summary>
+    /// The claim ends with the attempt, whatever its outcome. Leaving a stale owner behind
+    /// would make the next claim look like a takeover rather than an ordinary retry.
+    /// </summary>
+    private void ReleaseLease()
+    {
+        LeaseOwner = null;
+        LeaseExpiresAt = null;
+        ClaimedAt = null;
     }
 
     internal static TimeSpan BackoffFor(int attempt)

@@ -15,22 +15,39 @@ namespace Flow.Infrastructure.Notifications;
 /// persisted: the domain writes the notification and the outbox row inside its own
 /// transaction and commits, and delivery happens here afterwards, with its own retry
 /// schedule.
+///
+/// It is written to run in more than one replica at a time. Messages are claimed, not
+/// merely read, so two instances polling at the same instant cannot both take the same one.
+/// The provider-side idempotency key is the second layer: even if a claim were somehow
+/// duplicated, the same message carries the same key on every attempt.
 /// </summary>
 public sealed class OutboxDispatcherHostedService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly OutboxOptions _options;
+    private readonly TimeProvider _time;
     private readonly ILogger<OutboxDispatcherHostedService> _logger;
+
+    /// <summary>
+    /// Identifies this worker in the claims it takes. Diagnostic only — exclusivity comes
+    /// from the atomic claim, never from this string.
+    /// </summary>
+    private readonly string _workerId =
+        $"{Environment.MachineName}/{Environment.ProcessId}/{Guid.NewGuid():N}";
 
     public OutboxDispatcherHostedService(
         IServiceScopeFactory scopeFactory,
         IOptions<OutboxOptions> options,
-        ILogger<OutboxDispatcherHostedService> logger)
+        ILogger<OutboxDispatcherHostedService> logger,
+        TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory;
         _options = options.Value;
         _logger = logger;
+        _time = timeProvider ?? TimeProvider.System;
     }
+
+    public string WorkerId => _workerId;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -58,7 +75,7 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
             }
         }
 
-        _logger.LogInformation("Outbox dispatcher started.");
+        _logger.LogInformation("Outbox dispatcher {WorkerId} started.", _workerId);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -82,7 +99,7 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
             }
         }
 
-        _logger.LogInformation("Outbox dispatcher stopped.");
+        _logger.LogInformation("Outbox dispatcher {WorkerId} stopped.", _workerId);
     }
 
     /// <summary>Processes one batch. Exposed for tests so the loop does not have to be run.</summary>
@@ -94,12 +111,18 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
         var sender = scope.ServiceProvider.GetRequiredService<IPushNotificationSender>();
         var metrics = scope.ServiceProvider.GetService<IFlowMetrics>();
 
-        var due = await outbox.GetDueAsync(DateTimeOffset.UtcNow, _options.BatchSize, cancellationToken);
-        if (due.Count == 0) return 0;
+        var now = _time.GetUtcNow();
+
+        // Claimed, not merely read: from here on these messages belong to this worker, and
+        // no other replica will pick them up while the lease holds.
+        var claimed = await outbox.ClaimDueAsync(
+            _workerId, now, _options.LeaseDuration, _options.BatchSize, cancellationToken);
+
+        if (claimed.Count == 0) return 0;
 
         var dispatched = 0;
 
-        foreach (var message in due)
+        foreach (var message in claimed)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -112,28 +135,36 @@ public sealed class OutboxDispatcherHostedService : BackgroundService
                     DeliveryId: message.Id),
                 cancellationToken);
 
+            var completedAt = _time.GetUtcNow();
+
             switch (result.Outcome)
             {
                 case PushDeliveryOutcome.Delivered:
-                    message.MarkDispatched();
+                    message.MarkDispatched(completedAt);
                     metrics?.NotificationSent();
                     dispatched++;
                     break;
 
                 case PushDeliveryOutcome.TransientFailure:
                     // Backoff with jitter, and a dead-letter once the attempts run out.
-                    message.MarkFailed(result.Error ?? "Transient failure", _options.MaxAttempts);
+                    message.MarkFailed(
+                        result.Error ?? "Transient failure", _options.MaxAttempts, completedAt);
                     metrics?.NotificationFailed("transient");
                     break;
 
                 case PushDeliveryOutcome.PermanentFailure:
                     // No point retrying a malformed request or a rejected credential.
-                    message.MarkFailed(result.Error ?? "Permanent failure", maxAttempts: 1);
+                    message.MarkFailed(
+                        result.Error ?? "Permanent failure", maxAttempts: 1, completedAt);
                     metrics?.NotificationFailed("permanent");
                     break;
 
                 case PushDeliveryOutcome.NotConfigured:
-                    // Leave it exactly as it is: pending, and honest about it.
+                    // Leave this one exactly as it is: pending, and honest about it. The
+                    // claim is handed back rather than left to lapse, and no attempt is
+                    // counted, because nothing was actually tried.
+                    message.ReleaseClaim();
+                    await outbox.UpdateAsync(message, cancellationToken);
                     return dispatched;
             }
 
@@ -160,4 +191,10 @@ public sealed class OutboxOptions
     public int MaxAttempts { get; set; } = OutboxMessage.DefaultMaxAttempts;
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(15);
     public TimeSpan StartupDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How long a claim is respected. Long enough to cover a slow provider call and its
+    /// retries, short enough that a crashed worker does not hold a notification hostage.
+    /// </summary>
+    public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromMinutes(2);
 }

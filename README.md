@@ -159,7 +159,7 @@ mongosh --eval 'rs.status().myState'
 
 `myState` igual a `1` significa PRIMARY.
 
-No startup a aplicação cria **40 índices** de forma idempotente e garante os três papéis do
+No startup a aplicação cria **41 índices** de forma idempotente e garante os três papéis do
 Identity. O modelo documental completo, com os padrões de acesso que o justificam, está em
 [`docs/sprint-2/data-model.md`](docs/sprint-2/data-model.md).
 

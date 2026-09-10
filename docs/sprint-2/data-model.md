@@ -443,10 +443,13 @@ Gravada na **mesma transação** do domínio; despachada fora dela por um `Hoste
   "notificationId": "…",
   "dedupeKey": "IdeaApproved:6f1c…:9a2b…",  // idempotência do despacho
   "userId": "…", "title": "…", "body": "…", "deepLink": "…",
-  "status": "Pending",            // Pending | Dispatched | Failed | DeadLettered
+  "status": "Pending",            // Pending | Processing | Dispatched | Failed | DeadLettered
   "attemptCount": 0,
   "nextAttemptAt": ISODate("…"),
   "lastError": null,
+  "leaseOwner": null,             // quem detém o claim, só para diagnóstico
+  "leaseExpiresAt": null,         // até quando o claim é respeitado
+  "claimedAt": null,
   "createdAt": ISODate("…"), "dispatchedAt": null
 }
 ```
@@ -454,7 +457,35 @@ Gravada na **mesma transação** do domínio; despachada fora dela por um `Hoste
 | Nome | Chave | Tipo |
 |---|---|---|
 | `ix_outbox_dispatch` | `{ status: 1, nextAttemptAt: 1 }` | C |
+| `ix_outbox_lease` | `{ status: 1, leaseExpiresAt: 1 }` | C |
 | `ux_outbox_dedupe` | `{ dedupeKey: 1 }` | U |
+
+### Claim atômico, para rodar em mais de uma réplica
+
+Ler as mensagens devidas e só depois marcá-las não serve com duas instâncias: as duas veem
+o mesmo documento `Pending` antes de qualquer uma escrever, e o destinatário recebe a
+notificação duas vezes.
+
+Por isso a seleção e a tomada de posse são **uma operação só**, um `findOneAndUpdate` por
+mensagem, que escolhe uma devida e já a move para `Processing` com dono e prazo:
+
+```text
+Pending/Failed ──┐
+                 ├─ claim atômico ──▶ Processing ──┬──▶ Dispatched
+Processing com   │                                 ├──▶ Failed + nextAttemptAt
+lease vencido ───┘                                 └──▶ DeadLettered
+```
+
+`updateMany` não serviria: o MongoDB informa quantos documentos foram tocados, não quais, e
+o worker precisa saber exatamente o que passou a ser dele.
+
+O **lease** existe para o worker que morre no meio: pod reiniciado, processo morto, deploy
+durante o lote. Sem ele, a mensagem ficaria em `Processing` para sempre. Vencido o prazo,
+outro worker pode retomá-la — é o segundo ramo do filtro de claim.
+
+Nada disso depende de lock global nem de Redis. E se algo escapar, a chave de idempotência
+enviada ao provedor é a segunda camada: a mesma mensagem leva a mesma chave em toda
+tentativa.
 
 > **Duas chaves de idempotência, de propósito.** `dedupeKey` é nossa, moldada para o nosso
 > armazenamento: legível, com significado, única por evento de negócio. Já o provedor de
