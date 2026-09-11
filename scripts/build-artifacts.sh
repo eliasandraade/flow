@@ -174,21 +174,67 @@ if [ -s "$DIST/presentation-assets/openapi.json" ]; then
   ' "$DIST/presentation-assets/openapi.json" > "$DIST/presentation-assets/endpoints.txt"
 fi
 
+# The suite runs here, and a failure stops the packaging.
+#
+# It used to print a warning and carry on, which meant a red suite still produced a dist/
+# and two archives that looked exactly like a finished delivery. That is the one outcome a
+# packaging script must never have: everything downstream — someone attaching the archive
+# to a submission, a pipeline uploading it — treats "the script succeeded" as the signal,
+# and there was nothing else to read.
+#
 # FLOW_SKIP_TESTS exists for one situation: a pipeline where the suite already ran in an
-# earlier job and the container image for MongoDB would have to be pulled a second time.
-# It is opt-in, so running the script by hand always tests.
+# earlier job and the MongoDB image would have to be pulled again to prove the same thing.
+# Setting it moves the responsibility to the caller, who is then asserting the suite was
+# green elsewhere. The CI artefacts job earns that by declaring `needs: backend`, so it
+# cannot start unless the backend job — suite included — already passed.
+#
+# FLOW_TEST_COMMAND replaces the command for scripts/build-artifacts.contract.test.sh,
+# which has to be able to produce a red suite on demand. It runs through `bash -c` rather
+# than `eval` so a command carrying its own `exit` cannot take this script's exit status
+# with it.
 echo "==> Running the test suite"
+
+TEST_COMMAND="${FLOW_TEST_COMMAND:-dotnet test Flow.sln --nologo -v quiet}"
+tests_failed=0
+
 if [ "${FLOW_SKIP_TESTS:-0}" = "1" ]; then
-  echo "    skipped by FLOW_SKIP_TESTS; results recorded from the caller"
+  echo "    skipped by FLOW_SKIP_TESTS; the caller is responsible for having run them"
   echo "Test suite skipped in this run (FLOW_SKIP_TESTS=1)." > "$STAGE/test-output.txt"
-elif dotnet test Flow.sln --nologo -v quiet > "$STAGE/test-output.txt" 2>&1; then
-  echo "    tests passed"
 else
-  echo "    WARNING: some tests failed; see the recorded output" >&2
+  if [ -n "${FLOW_TEST_COMMAND:-}" ]; then
+    echo "    running an overridden command: $TEST_COMMAND"
+  fi
+
+  if bash -c "$TEST_COMMAND" > "$STAGE/test-output.txt" 2>&1; then
+    echo "    tests passed"
+  else
+    tests_failed=1
+  fi
 fi
+
+# Recorded either way. On a green run it is a delivery asset; on a red one it is the
+# evidence of what broke, and it has to exist before the exit below.
 grep -E "Aprovado!|Passed!|Com falha|Failed!" "$STAGE/test-output.txt" \
   > "$DIST/presentation-assets/test-results.txt" 2>/dev/null || \
   cp "$STAGE/test-output.txt" "$DIST/presentation-assets/test-results.txt"
+
+if [ "$tests_failed" = "1" ]; then
+  echo "    ERROR: the test suite failed, so no delivery will be packaged." >&2
+
+  # $STAGE survives because the run stops here; the cleanup at the end is never reached.
+  echo "    Full output kept at $STAGE/test-output.txt. What it reported:" >&2
+
+  # Both languages: the SDK reports in whatever locale the machine is set to.
+  summary=$(grep -iE "error|erro|falha|failed" "$STAGE/test-output.txt" | head -n 20 || true)
+
+  if [ -n "$summary" ]; then
+    printf '%s\n' "$summary" >&2
+  else
+    tail -n 20 "$STAGE/test-output.txt" >&2 || true
+  fi
+
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Archives

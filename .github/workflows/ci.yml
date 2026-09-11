@@ -323,6 +323,17 @@ jobs:
       - name: Test the specification contract
         run: node --test scripts/*.test.mjs
 
+      # Runs the packaging script three times with its test command stubbed, to prove it
+      # refuses to package a delivery when the suite is red. Production never exercises
+      # that path — a normal run means the tests passed — which is how it went fail-open
+      # unnoticed. Costs about a minute; the alternative is trusting the branch nobody
+      # runs. Needs the mongo service, since the OpenAPI export is not stubbed out.
+      - name: Test the packaging contract
+        env:
+          Mongo__ConnectionString: mongodb://localhost:27017
+          Mongo__Database: flow_openapi_export
+        run: bash scripts/build-artifacts.contract.test.sh
+
       # The suite already ran in the backend job; repeating it here would pull the MongoDB
       # image a second time to prove the same thing.
       - name: Build the delivery artefacts
