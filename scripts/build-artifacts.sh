@@ -8,6 +8,10 @@
 #
 # Usage:  ./scripts/build-artifacts.sh
 #
+#   FLOW_OPENAPI_PORT   port the API is started on to export the specification
+#                       (default 41999; change it if that one is taken)
+#   FLOW_SKIP_TESTS=1   skip the suite, for a pipeline that already ran it
+#
 # Requires: .NET 8 SDK, Node 20+. A running MongoDB is only needed for the
 # integration tests, which are skipped when FLOW_TEST_MONGO_URI is unset and no
 # Docker daemon is available.
@@ -50,42 +54,88 @@ echo "==> Exporting openapi.json"
 # real route table rather than a hand-maintained copy.
 #
 # That means a database is required, and not only for the health endpoint: startup seeds
-# the Identity roles before serving anything, and aborts if it cannot reach MongoDB. An
-# earlier version of this script claimed /swagger was served regardless. It is not, and
-# the claim went unnoticed because the machine it was written on happened to have MongoDB
-# running. Point Mongo__ConnectionString at whatever is available; a standalone server is
-# enough here, since nothing on this path opens a transaction.
+# the Identity roles before serving anything, and aborts if it cannot reach MongoDB. Point
+# Mongo__ConnectionString at whatever is available; a standalone server is enough here,
+# since nothing on this path opens a transaction.
+#
+# Fetching over HTTP makes "something answered" the weakest possible evidence. This block
+# used to hard-code port 5199 and trust any non-empty response. On a machine where another
+# development server already held that port, the API failed to bind, curl reached the
+# stranger, and its HTML was written straight to openapi.json. The run only fell over
+# several steps later, when a JSON parse tripped on it — and only because that particular
+# stranger served a page. One serving valid JSON would have shipped.
+#
+# So the export proves three things before publishing anything: our own process is still
+# alive, the bytes came back from it, and the document is Flow's.
+OPENAPI_PORT="${FLOW_OPENAPI_PORT:-41999}"
+SPEC_URL="http://localhost:$OPENAPI_PORT/swagger/v1/swagger.json"
+CANDIDATE="$STAGE/openapi.candidate.json"
+API_LOG="$STAGE/openapi-export.log"
+API_PID=""
+
+# Only ever the process this script started. A stranger on the port is the problem being
+# solved here, not something to go killing.
+stop_api() {
+  if [ -n "$API_PID" ] && kill -0 "$API_PID" 2>/dev/null; then
+    kill "$API_PID" 2>/dev/null || true
+    wait "$API_PID" 2>/dev/null || true
+  fi
+  API_PID=""
+}
+trap stop_api EXIT INT TERM
+
+export_failed() {
+  echo "    ERROR: $1" >&2
+  echo "    Last lines of the API's own output ($API_LOG):" >&2
+  tail -n 25 "$API_LOG" >&2 || true
+  rm -f "$CANDIDATE"
+  exit 1
+}
+
 ASPNETCORE_ENVIRONMENT=Development \
-ASPNETCORE_URLS=http://localhost:5199 \
+ASPNETCORE_URLS="http://localhost:$OPENAPI_PORT" \
 Swagger__Enabled=true \
 Mongo__EnsureIndexes=false \
 Mongo__ConnectionString="${Mongo__ConnectionString:-mongodb://localhost:27017/?replicaSet=rs0}" \
 Mongo__Database="${Mongo__Database:-flow_openapi_export}" \
 JwtSettings__SecretKey="openapi-export-only-not-a-real-secret-32b" \
-dotnet "$STAGE/api/Flow.API.dll" > "$STAGE/openapi-export.log" 2>&1 &
+dotnet "$STAGE/api/Flow.API.dll" > "$API_LOG" 2>&1 &
 API_PID=$!
 
+echo "    starting the API on port $OPENAPI_PORT (override with FLOW_OPENAPI_PORT)"
+
+exported=0
+
 for _ in $(seq 1 40); do
-  if curl -fsS "http://localhost:5199/swagger/v1/swagger.json" \
-      -o "$DIST/presentation-assets/openapi.json" 2>/dev/null; then
-    echo "    openapi.json exported"
+  # Liveness first, every time round. If our API is gone then whatever is listening on
+  # that port belongs to somebody else, and asking it for a specification is precisely
+  # the bug. A port already in use is the ordinary reason to end up here.
+  if ! kill -0 "$API_PID" 2>/dev/null; then
+    API_PID=""
+    export_failed "the API exited before serving the specification. A port already taken and an unreachable database are the usual reasons; its own output below says which. If port $OPENAPI_PORT is in use, set FLOW_OPENAPI_PORT to a free one."
+  fi
+
+  # Downloaded beside the deliverable, never onto it: a rejected candidate must not be
+  # able to leave a half-written openapi.json behind.
+  if curl -fsS "$SPEC_URL" -o "$CANDIDATE" 2>/dev/null; then
+    exported=1
     break
   fi
+
   sleep 1
 done
 
-kill "$API_PID" 2>/dev/null || true
-wait "$API_PID" 2>/dev/null || true
+[ "$exported" = "1" ] || export_failed "the API never served $SPEC_URL."
 
-# A warning here used to be enough, which meant the script could finish "successfully"
-# having produced a dist/ with no specification in it. Failing is the honest outcome: the
-# specification is a deliverable, not a nice-to-have.
-if [ ! -s "$DIST/presentation-assets/openapi.json" ]; then
-  echo "    ERROR: openapi.json could not be exported. The API did not start." >&2
-  echo "    Last lines of its output:" >&2
-  tail -n 20 "$STAGE/openapi-export.log" >&2 || true
-  exit 1
+# Answering is not the same as being the right server, and being JSON is not the same as
+# being ours. scripts/check-openapi.mjs is the single definition of that difference; the
+# CI job applies it again to the published file.
+if ! node scripts/check-openapi.mjs "$CANDIDATE"; then
+  export_failed "what answered on port $OPENAPI_PORT did not serve Flow's specification."
 fi
+
+stop_api
+mv "$CANDIDATE" "$DIST/presentation-assets/openapi.json"
 
 # ---------------------------------------------------------------------------
 # Mobile

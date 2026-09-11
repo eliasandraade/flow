@@ -317,6 +317,12 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-${{ runner.os }}-
 
+      # First and cheap. build-artifacts.sh refuses to publish a specification that this
+      # check rejects, so a broken check either blocks a good export or waves a bad one
+      # through — both worth finding before the export runs.
+      - name: Test the specification contract
+        run: node --test scripts/*.test.mjs
+
       # The suite already ran in the backend job; repeating it here would pull the MongoDB
       # image a second time to prove the same thing.
       - name: Build the delivery artefacts
@@ -326,16 +332,13 @@ jobs:
           Mongo__Database: flow_openapi_export
         run: ./scripts/build-artifacts.sh
 
-      # The specification is exported from the running application rather than from a copy
-      # kept by hand, so an endpoint that stops being reachable shows up here.
+      # The same contract the export applies to its candidate, applied again to the file
+      # that actually landed in dist/. One definition in scripts/check-openapi.mjs, so the
+      # two cannot drift into disagreeing about what a valid specification is — and unlike
+      # counting endpoints, it also catches a document that is large, well-formed, and
+      # simply not ours.
       - name: Check the exported specification
-        run: |
-          set -euo pipefail
-          spec=dist/presentation-assets/openapi.json
-          test -s "$spec" || { echo "::error::openapi.json was not produced."; exit 1; }
-          endpoints=$(node -e "const s=require('./$spec');console.log(Object.values(s.paths??{}).reduce((n,m)=>n+Object.keys(m).length,0))")
-          echo "The specification describes $endpoints endpoints."
-          test "$endpoints" -ge 50 || { echo "::error::Only $endpoints endpoints; expected the full surface."; exit 1; }
+        run: node scripts/check-openapi.mjs dist/presentation-assets/openapi.json
 
       # Source and documentation only. Nothing here carries a credential: .env is not in the
       # repository, and .env.example holds empty placeholders.
